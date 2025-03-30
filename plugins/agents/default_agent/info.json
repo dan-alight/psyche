@@ -1,0 +1,19 @@
+{
+  "name": "basic_chat",
+  "language": "cpp",
+  "type": "agent",
+  "functions": [
+    {
+      "name": "chat_out",
+      "description": "Receive LLM completions",
+      "return": "string",
+      "stream": true
+    },
+    {
+      "name": "chat_in",
+      "description": "Get channel for providing LLM input",
+      "return": "int64_t",
+      "stream": false
+    }
+  ]
+}
