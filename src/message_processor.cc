@@ -18,7 +18,7 @@ void MessageProcessor::Stop() {
   // Callbacks might own Python objects.
   // Must clear them before Python interpreter shuts down.
   py::gil_scoped_acquire gil;
-  registered_callbacks_.clear(); 
+  registered_callbacks_.clear();
 }
 void MessageProcessor::Run() {
   running_ = true;
@@ -52,6 +52,9 @@ void MessageProcessor::ProcessPayload(const Payload& payload) {
   if (search == registered_callbacks_.end()) return;
   auto& cb = search->second;
   cb(payload);
+  if (payload.flags & static_cast<int32_t>(PayloadFlags::kFinal)) {
+    registered_callbacks_.erase(payload.receiver_channel_id);
+  }
 }
 
 int64_t MessageProcessor::GetNewChannelId() {
@@ -60,6 +63,10 @@ int64_t MessageProcessor::GetNewChannelId() {
 
 void MessageProcessor::RegisterCallback(int64_t channel_id, std::function<void(Payload)> callback) {
   registered_callbacks_[channel_id] = callback;
+}
+
+void MessageProcessor::RemoveCallback(int64_t channel_id) {
+  registered_callbacks_.erase(channel_id);
 }
 
 }  // namespace psyche

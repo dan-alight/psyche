@@ -1,7 +1,3 @@
-import os
-import sys
-import logging
-
 class Plugin:
   pass
 
@@ -10,17 +6,18 @@ class Agent(Plugin):
     pass
 
 class Payload:
-  def __init__(self):
-    self.id = -1
-    self.data = None
-    self.size = 0
-    self.offset = 0
-
-  def __init__(self, id, data, size, offset):
+  def set_flags(self, id, data, size, offset, flags):
     self.id = id
     self.data = data
     self.size = size
     self.offset = offset
+    self.flags = flags
+
+  def __init__(self):
+    self.set_flags(-1, None, 0, 0, 0)
+
+  def __init__(self, id, data, size, offset = 0, flags = 0):
+    self.set_flags(id, data, size, offset, flags)
 
 class PluginInitializeStatus:
   SUCCESS = 0

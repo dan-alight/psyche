@@ -183,13 +183,20 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
 
   py::class_<Payload>(m, "Payload")
       .def(py::init<>())
-      .def(py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset) {
-        return Payload{receiver_channel_id, data, size, offset};
-      }))
+      .def(
+          py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset, int32_t flags) {
+            return Payload{receiver_channel_id, data, size, offset, flags};
+          }),
+          py::arg("receiver_channel_id"),
+          py::arg("data"),
+          py::arg("size"),
+          py::arg("offset") = 0,
+          py::arg("flags") = 0)
       .def_readwrite("receiver_channel_id", &Payload::receiver_channel_id)
       .def_readwrite("data", &Payload::data)
       .def_readwrite("size", &Payload::size)
-      .def_readwrite("offset", &Payload::offset);
+      .def_readwrite("offset", &Payload::offset)
+      .def_readwrite("flags", &Payload::flags);
 
   py::class_<PluginInterface>(m, "PluginInterface")
       .def(py::init<>())

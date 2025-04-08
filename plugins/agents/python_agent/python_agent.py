@@ -12,7 +12,7 @@ class PythonAgent(Agent):
     s = to_string(payload.data)
     s_len = len(s)
     for id in self.receiving_channels:
-      self.interface.send_payload(Payload(id, s, s_len, 0))
+      self.interface.send_payload(Payload(id, s, s_len))
 
   def invoke(self, channel_id, data, aux):
     command = json.loads(data)
@@ -21,7 +21,7 @@ class PythonAgent(Agent):
     elif command['name'] == 'chat_in':
       new_channel_id = self.interface.get_new_channel_id()
       self.interface.register_callback(new_channel_id, self.receive_chat_input)
-      self.interface.send_payload(Payload(channel_id, new_channel_id, 8, 0))
+      self.interface.send_payload(Payload(channel_id, new_channel_id, 8))
 
   def stop_stream(self, channel_id):
     self.receiving_channels = [

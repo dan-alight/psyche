@@ -27,6 +27,7 @@ class MessageProcessor {
   }
   int64_t GetNewChannelId();
   void RegisterCallback(int64_t channel_id, std::function<void(Payload)> callback);
+  void RemoveCallback(int64_t channel_id);
 
  private:
   using Message = std::variant<

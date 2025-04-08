@@ -26,11 +26,16 @@ std::shared_ptr<void> make_shared_type_erased(T val) {
   return std::shared_ptr<void>(std::make_shared<T>(std::move(val)));
 }
 
+enum class PayloadFlags : int32_t {
+  kFinal = 1 << 0
+};
+
 struct Payload {
   int64_t receiver_channel_id;
   std::shared_ptr<void> data;
   size_t size;
-  size_t offset;
+  size_t offset = 0;
+  int32_t flags = 0;
 };
 
 using Alert = std::string;
