@@ -88,7 +88,7 @@ void Executor::Start() {
   int64_t generic_id = message_processor_.GetNewChannelId();
   int64_t chat_send_id = -1;
   int64_t chat_receive_id = message_processor_.GetNewChannelId();
-
+  
   message_processor_.RegisterCallback(chat_receive_id, [](Payload payload) -> void {
     std::string& s = *std::static_pointer_cast<std::string>(payload.data);
   });
@@ -98,7 +98,6 @@ void Executor::Start() {
   message_processor_.RegisterCallback(generic_id, [&chat_send_id](Payload payload) -> void {
     chat_send_id = *std::static_pointer_cast<int64_t>(payload.data);
   });
-
   std::string chat_in_json = ToJson({{"name", "chat_in"}});
   message_processor_.EnqueueMessage(InvokeCommand{generic_id, "python_agent", chat_in_json});
 
@@ -112,7 +111,7 @@ void Executor::Start() {
     } else {
       if (chat_send_id == -1) continue;
       auto data = make_shared_type_erased(command);
-      message_processor_.EnqueueMessage(Payload{chat_send_id, data, command.length(), 0});
+      message_processor_.EnqueueMessage(Payload{chat_send_id, data, command.length()});
     }
   }
   message_processor_.Stop();

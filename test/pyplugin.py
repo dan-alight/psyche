@@ -1,9 +1,13 @@
 class Plugin:
   pass
-
+  
 class Agent(Plugin):
   def __init__(self):
     pass
+
+class PayloadFlags:
+  FINAL = 1 << 0
+  ERROR = 1 << 1
 
 class Payload:
   def set_flags(self, id, data, size, offset, flags):

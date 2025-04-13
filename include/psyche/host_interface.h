@@ -6,6 +6,8 @@
 #include <string>
 #include <variant>
 
+#include "bitwise.h"
+
 namespace psyche {
 
 struct InvokeCommand {
@@ -26,8 +28,13 @@ std::shared_ptr<void> make_shared_type_erased(T val) {
   return std::shared_ptr<void>(std::make_shared<T>(std::move(val)));
 }
 
-enum class PayloadFlags : int32_t {
-  kFinal = 1 << 0
+enum class PayloadFlags : uint32_t {
+  kFinal = 1 << 0,
+  kError = 1 << 1,
+};
+template <>
+struct EnableBitwiseOperators<PayloadFlags> {
+  static constexpr bool value = true;
 };
 
 struct Payload {
@@ -35,7 +42,7 @@ struct Payload {
   std::shared_ptr<void> data;
   size_t size;
   size_t offset = 0;
-  int32_t flags = 0;
+  uint32_t flags = 0;
 };
 
 using Alert = std::string;

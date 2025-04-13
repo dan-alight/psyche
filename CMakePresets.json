@@ -10,7 +10,7 @@
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_CXX_FLAGS": "/EHsc /W3 /MP",
+        "CMAKE_CXX_FLAGS": "/EHsc /MP",
         "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Od",
         "CMAKE_CXX_FLAGS_RELEASE": "/O2 /DNDEBUG",
         "ENABLED_RESOURCES": "all",

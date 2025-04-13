@@ -30,11 +30,13 @@ class MessageProcessor {
   void RemoveCallback(int64_t channel_id);
 
  private:
+  struct ExitLoop {};
   using Message = std::variant<
       InvokeCommand,
       StopStreamCommand,
       Payload,
-      Alert>;
+      Alert,
+      ExitLoop>;
 
   void Run();
   void ProcessInvokeCommand(const InvokeCommand& command);

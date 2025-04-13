@@ -41,7 +41,6 @@ struct type_caster<std::shared_ptr<void>> {
   // Convert from C++ to Python
   static handle cast(std::shared_ptr<void> src, return_value_policy policy, handle parent) {
     if (src == nullptr) return none().release();
-    ;
     auto* shared_copy = new std::shared_ptr<void>(src);
     auto deleter = [](PyObject* cap) {
       auto* ptr = static_cast<std::shared_ptr<void>*>(PyCapsule_GetPointer(cap, "shared_void_ptr"));
@@ -153,6 +152,7 @@ using psyche::ConvertSharedVoidPtr;
 using psyche::CppPrint;
 using psyche::InvokeCommand;
 using psyche::Payload;
+using psyche::PayloadFlags;
 using psyche::Plugin;
 using psyche::PluginInitializeStatus;
 using psyche::PluginInterface;
@@ -166,8 +166,7 @@ namespace py = pybind11;
 PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
   py::enum_<PluginInitializeStatus>(m, "PluginInitializeStatus")
       .value("SUCCESS", PluginInitializeStatus::kSuccess)
-      .value("ERROR", PluginInitializeStatus::kError)
-      .export_values();
+      .value("ERROR", PluginInitializeStatus::kError);
 
   py::class_<InvokeCommand>(m, "InvokeCommand")
       .def(py::init<>())
@@ -181,10 +180,74 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def_readwrite("stream_channel_id", &StopStreamCommand::stream_channel_id)
       .def_readwrite("to", &StopStreamCommand::to);
 
+  py::enum_<PayloadFlags>(m, "PayloadFlags")
+      .value("FINAL", PayloadFlags::kFinal)
+      .value("ERROR", PayloadFlags::kError)
+      .def("__int__", [](PayloadFlags flag) {
+        return static_cast<uint32_t>(flag);
+      })
+      .def("__or__", [](PayloadFlags self, const py::object& other) -> py::object {
+        uint32_t self_val = static_cast<uint32_t>(self);
+        if (py::isinstance<PayloadFlags>(other)) {
+          uint32_t other_val = static_cast<uint32_t>(other.cast<PayloadFlags>());
+          return py::int_(self_val | other_val);
+        } else if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(self_val | other_val);
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__ror__", [](PayloadFlags self, const py::object& other) -> py::object {
+        if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(other_val | static_cast<uint32_t>(self));
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__and__", [](PayloadFlags self, const py::object& other) -> py::object {
+        uint32_t self_val = static_cast<uint32_t>(self);
+        if (py::isinstance<PayloadFlags>(other)) {
+          uint32_t other_val = static_cast<uint32_t>(other.cast<PayloadFlags>());
+          return py::int_(self_val & other_val);
+        } else if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(self_val & other_val);
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__rand__", [](PayloadFlags self, const py::object& other) -> py::object {
+        if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(other_val & static_cast<uint32_t>(self));
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__xor__", [](PayloadFlags self, const py::object& other) -> py::object {
+        uint32_t self_val = static_cast<uint32_t>(self);
+        if (py::isinstance<PayloadFlags>(other)) {
+          uint32_t other_val = static_cast<uint32_t>(other.cast<PayloadFlags>());
+          return py::int_(self_val ^ other_val);
+        } else if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(self_val ^ other_val);
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__rxor__", [](PayloadFlags self, const py::object& other) -> py::object {
+        if (py::isinstance<py::int_>(other)) {
+          uint32_t other_val = other.cast<uint32_t>();
+          return py::int_(other_val ^ static_cast<uint32_t>(self));
+        }
+        return py::cast(Py_NotImplemented);
+      })
+      .def("__invert__", [](PayloadFlags self) -> uint32_t {
+        return ~static_cast<uint32_t>(self);
+      });
+
   py::class_<Payload>(m, "Payload")
       .def(py::init<>())
       .def(
-          py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset, int32_t flags) {
+          py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset, uint32_t flags) {
             return Payload{receiver_channel_id, data, size, offset, flags};
           }),
           py::arg("receiver_channel_id"),
@@ -256,6 +319,7 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
   all_items.append(py::str("PluginInitializeStatus"));
   all_items.append(py::str("InvokeCommand"));
   all_items.append(py::str("StopStreamCommand"));
+  all_items.append(py::str("PayloadFlags"));
   all_items.append(py::str("Payload"));
   all_items.append(py::str("PluginInterface"));
   all_items.append(py::str("AgentInterface"));
