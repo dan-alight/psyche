@@ -52,10 +52,11 @@ void WebSocketsServer::StartServer() {
 
     std::string msg_type = doc["msg_type"].GetString();
     if (msg_type == "get_new_channel_id") {
+      constexpr size_t header_size = sizeof(char);
       int64_t new_channel_id = message_processor_.GetNewChannelId();
-      std::vector<char> response(1 + sizeof(int64_t));
+      std::vector<char> response(header_size + sizeof(int64_t));
       response[0] = static_cast<char>(ResponseId::kNewChannelId);
-      memcpy(1 + response.data(), &new_channel_id, sizeof(int64_t));
+      memcpy(response.data() + header_size, &new_channel_id, sizeof(int64_t));
       ws->send(std::string_view(response.data(), response.size()), uWS::OpCode::BINARY);
 
     } else if (msg_type == "invoke") {
@@ -81,9 +82,10 @@ void WebSocketsServer::StartServer() {
           memcpy(response.data() + header_size, data_ptr, payload.size);
 
           loop_->defer([this, ws, ws_id, msg = std::move(response)]() {
-            std::string_view msg_view(msg.data(), msg.size());
-            if (open_websockets_.contains(ws_id))
+            if (open_websockets_.contains(ws_id)) {
+              std::string_view msg_view(msg.data(), msg.size());
               ws->send(msg_view, uWS::OpCode::BINARY);
+            }
           });
         });
       }

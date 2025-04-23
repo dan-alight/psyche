@@ -169,6 +169,7 @@ PluginLoadStatus PluginManager::LoadCpp(const std::string& name, const std::stri
 }
 
 PluginLoadStatus PluginManager::LoadPython(const std::string& name, const std::string& dir) {
+  py::gil_scoped_acquire gil;
   py::module_ sys = py::module_::import("sys");
   py::module_ importlib = py::module_::import("importlib");
   py::module_ os = py::module_::import("os");
@@ -199,7 +200,8 @@ PluginLoadStatus PluginManager::LoadPython(const std::string& name, const std::s
   py::object plugin_class = mod.attr(SnakeToPascal(name).c_str());
   py::object instance = plugin_class();
 
-  auto* ptr = instance.cast<std::unique_ptr<Agent>>().release();
+  auto* ptr = instance.cast<std::unique_ptr<Plugin>>().release();
+
   loaded_plugins_[name] = {PluginLanguage::kPython, nullptr, ptr};
   return PluginLoadStatus::kSuccess;
 }

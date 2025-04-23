@@ -7,8 +7,10 @@
 #include <variant>
 
 #include "bitwise.h"
+#include "pybind11/pytypes.h"
 
 namespace psyche {
+namespace py = pybind11;
 
 struct InvokeCommand {
   // could be -1 if no response is wanted/expected
@@ -68,6 +70,10 @@ struct AgentInterface : public PluginInterface {
   std::function<void(StopStreamCommand)> stop_stream;
   // much more reasonable to extend the AgentInterface/PluginInterface than the class APIs
   // could have a function for engine commands
+
+  struct Internal {
+    std::function<void(int64_t, py::object)> py_register_callback;
+  } internal;
 };
 
 }  // namespace psyche

@@ -3,6 +3,7 @@
 #include <type_traits>
 
 #include "agent.h"
+#include "asyncio_loop.h"
 #include "pybind11/embed.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
@@ -56,6 +57,9 @@ namespace py = pybind11;
 
 class PyPlugin : public Plugin, public py::trampoline_self_life_support {
  public:
+  void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
+    asyncio_loop_ = asyncio_loop;
+  }
   std::string GetPluginInfo() override {
     PYBIND11_OVERRIDE_PURE(std::string, Plugin, get_plugin_info);
   }
@@ -68,28 +72,46 @@ class PyPlugin : public Plugin, public py::trampoline_self_life_support {
   void StopStream(int64_t channel_id) override {
     PYBIND11_OVERRIDE_PURE(void, Plugin, stop_stream, channel_id);
   }
+
+ private:
+  std::shared_ptr<AsyncioLoop> asyncio_loop_;
 };
 
 class PyAgent : public Agent, public py::trampoline_self_life_support {
  public:
+  void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
+    asyncio_loop_ = asyncio_loop;
+  }
   std::string GetPluginInfo() override {
-    PYBIND11_OVERRIDE_PURE(std::string, Agent, get_plugin_info);
+    py::gil_scoped_acquire gil;
+    py::function override = py::get_override(this, "get_plugin_info");
+    py::object result = asyncio_loop_->RunSync(override);
+    return result.cast<std::string>();
   }
 
   void Uninitialize() override {
-    PYBIND11_OVERRIDE_PURE(void, Agent, uninitialize);
+    py::gil_scoped_acquire gil;
+    py::function override = py::get_override(this, "initialize");
+    asyncio_loop_->ScheduleFunction(override);
   }
 
   void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) override {
-    PYBIND11_OVERRIDE_PURE(void, Agent, invoke, channel_id, data, aux);
+    py::gil_scoped_acquire gil;
+    py::function override = py::get_override(this, "invoke");
+    asyncio_loop_->ScheduleFunction(override, py::make_tuple(channel_id, data, aux));
   }
 
   void StopStream(int64_t channel_id) override {
-    PYBIND11_OVERRIDE_PURE(void, Agent, stop_stream, channel_id);
+    py::gil_scoped_acquire gil;
+    py::function override = py::get_override(this, "stop_stream");
+    asyncio_loop_->ScheduleFunction(override, py::make_tuple(channel_id));
   }
 
   PluginInitializeStatus Initialize(AgentInterface agent_interface) override {
-    PYBIND11_OVERRIDE_PURE(PluginInitializeStatus, Agent, initialize, agent_interface);
+    py::gil_scoped_acquire gil;
+    py::function override = py::get_override(this, "initialize");
+    py::object result = asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
+    return result.cast<PluginInitializeStatus>();
   }
 
   void PluginAdded(std::string plugin_info) override {
@@ -99,10 +121,16 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
   void PluginRemoved(std::string name) override {
     PYBIND11_OVERRIDE_PURE(void, Agent, plugin_removed, name);
   }
+
+ private:
+  std::shared_ptr<AsyncioLoop> asyncio_loop_;
 };
 
 class PyResource : public Resource, public py::trampoline_self_life_support {
  public:
+  void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
+    asyncio_loop_ = asyncio_loop;
+  }
   std::string GetPluginInfo() override {
     PYBIND11_OVERRIDE_PURE(std::string, Resource, get_plugin_info);
   }
@@ -118,6 +146,9 @@ class PyResource : public Resource, public py::trampoline_self_life_support {
   PluginInitializeStatus Initialize(ResourceInterface resource_interface) override {
     PYBIND11_OVERRIDE_PURE(PluginInitializeStatus, Resource, initialize, resource_interface);
   }
+
+ private:
+  std::shared_ptr<AsyncioLoop> asyncio_loop_;
 };
 
 void CppPrint(const std::string& msg) {
@@ -148,6 +179,7 @@ auto ConvertSharedVoidPtr(py::capsule cap) {
 using psyche::Agent;
 using psyche::AgentInterface;
 using psyche::Alert;
+using psyche::AsyncioLoop;
 using psyche::ConvertSharedVoidPtr;
 using psyche::CppPrint;
 using psyche::InvokeCommand;
@@ -285,15 +317,14 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
         a.invoke_with_callback(ic, cb);
       })
       .def("register_callback", [](AgentInterface& a, int64_t channel_id, py::object cb) {
-        auto callback = [cb](Payload payload) {
-          cb.attr("__call__")(payload);
-        };
-        a.register_callback(channel_id, callback);
+        a.internal.py_register_callback(channel_id, cb);
       })
       .def("stop_stream", [](AgentInterface& a, const StopStreamCommand& ssc) {
         a.stop_stream(ssc);
       });
 
+  // I don't think I need any of these defs because this just exposes them in Python
+  // and I don't need to call them from Python.
   py::class_<Plugin, PyPlugin, py::smart_holder>(m, "Plugin")
       .def(py::init<>())
       .def("get_plugin_info", &Plugin::GetPluginInfo)

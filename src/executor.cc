@@ -23,6 +23,7 @@
 #include "plugin.h"
 #include "plugin_manager.h"
 #include "pybind11/embed.h"
+#include "pyplugin.h"
 #include "resource.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
@@ -39,6 +40,7 @@ Executor::Executor()
 
 void Executor::Start() {
   py::scoped_interpreter interpreter_;
+  py::gil_scoped_release release;
 
   std::string exe_dir = GetExecutableDir();
 
@@ -50,6 +52,9 @@ void Executor::Start() {
   auto logger = std::make_shared<spdlog::logger>("", sinks.begin(), sinks.end());
   spdlog::set_default_logger(logger);
 
+  asyncio_loop_ = std::make_shared<AsyncioLoop>();
+  asyncio_loop_->Start();
+
   auto& plugin_manager = PluginManager::Get();
   auto plugins_dir = exe_dir + "/plugins";
   plugin_manager.SetPluginsDir(plugins_dir);
@@ -58,7 +63,10 @@ void Executor::Start() {
   if (status != PluginLoadStatus::kSuccess) {
     spdlog::error("Failed to load plugin: {} with status: {}", plugin_name, static_cast<int>(status));
   }
-  Agent* plugin = static_cast<Agent*>(plugin_manager.GetPlugin(plugin_name));
+  Plugin* plugin = plugin_manager.GetPlugin(plugin_name);
+  PyPlugin* pyplugin = static_cast<PyPlugin*>(plugin);
+  pyplugin->SetLoop(asyncio_loop_);
+  Agent* agent = static_cast<Agent*>(plugin);
 
   AgentInterface agent_interface;
   agent_interface.get_host_info = []() -> std::string {
@@ -75,20 +83,26 @@ void Executor::Start() {
   agent_interface.get_new_channel_id = [this]() -> int64_t {
     return message_processor_.GetNewChannelId();
   };
-  agent_interface.register_callback =
-      [this](int64_t channel_id, std::function<void(Payload)> callback) -> void {
-    message_processor_.RegisterCallback(channel_id, std::move(callback));
-  };
   agent_interface.send_payload = [this](Payload payload) -> void {
     message_processor_.EnqueueMessage(std::move(payload));
   };
+  agent_interface.internal.py_register_callback =
+      [this](int64_t channel_id, py::object callback) -> void {
+    auto callback_wrapper = [this, callback](Payload payload) {
+      py::gil_scoped_acquire gil;
+      py::args args = py::make_tuple(py::cast(payload));
+      asyncio_loop_->ScheduleFunction(callback, args);
+    };
+    message_processor_.RegisterCallback(channel_id, std::move(callback_wrapper));
+  };
+  agent->Initialize(agent_interface);
 
-  plugin->Initialize(agent_interface);
+  auto info = agent->GetPluginInfo();
 
   int64_t generic_id = message_processor_.GetNewChannelId();
   int64_t chat_send_id = -1;
   int64_t chat_receive_id = message_processor_.GetNewChannelId();
-  
+
   message_processor_.RegisterCallback(chat_receive_id, [](Payload payload) -> void {
     std::string& s = *std::static_pointer_cast<std::string>(payload.data);
   });
@@ -101,7 +115,6 @@ void Executor::Start() {
   std::string chat_in_json = ToJson({{"name", "chat_in"}});
   message_processor_.EnqueueMessage(InvokeCommand{generic_id, "python_agent", chat_in_json});
 
-  py::gil_scoped_release release;
   message_processor_.Start();
   std::string command;
   while (true) {
@@ -115,6 +128,7 @@ void Executor::Start() {
     }
   }
   message_processor_.Stop();
+  asyncio_loop_->Stop();
 }
 
 }  // namespace psyche
