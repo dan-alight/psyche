@@ -10,7 +10,9 @@
 #endif
 
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -20,9 +22,9 @@
 namespace psyche {
 
 #if defined(_WIN32)
-using PluginHandle = HMODULE;
+using PluginLibPtr = HMODULE;
 #else
-using PluginHandle = void*;
+using PluginLibPtr = void*;
 #endif
 
 enum class PluginLoadStatus {
@@ -46,8 +48,36 @@ enum class PluginLanguage {
 
 struct PluginData {
   PluginLanguage language;
-  PluginHandle handle;
-  Plugin* instance;
+  PluginType type;
+  PluginLibPtr ptr;
+  Plugin* plugin;
+  std::shared_mutex mut;
+  bool alive;
+
+  PluginData(PluginLanguage language, PluginType type, Plugin* plugin, PluginLibPtr ptr)
+      : language(language), type(type), ptr(ptr), plugin(plugin), mut(), alive(true) {
+  }
+  PluginData(PluginLanguage language, PluginType type, Plugin* plugin)
+      : language(language), type(type), ptr(nullptr), plugin(plugin), mut(), alive(true) {
+  }
+};
+
+struct PluginHolder {
+  Plugin* plugin;
+  std::shared_lock<std::shared_mutex> lock;
+  PluginLanguage language;
+  PluginType type;
+
+  PluginHolder(Plugin* plugin, std::shared_mutex& mut, PluginLanguage language, PluginType type)
+      : plugin(plugin), lock(mut), language(language), type(type) {
+  }
+
+  Plugin* operator->() const {
+    return plugin;
+  }
+  Plugin& operator*() const {
+    return *plugin;
+  }
 };
 
 // Just loads/unloads and keeps track of plugins. Is not concerned with plugin semantics/validity.
@@ -63,16 +93,17 @@ class PluginManager {
   PluginUnloadStatus Unload(const std::string& name);
   void SetPluginsDir(const std::string& dir);
   bool IsLoaded(const std::string& name);
-  Plugin* GetPlugin(const std::string& name);
+  std::optional<PluginHolder> GetPlugin(const std::string& name);
+  void DisablePluginAccess(const std::string& name);
 
  private:
   PluginManager() = default;
   ~PluginManager() = default;
-  PluginLoadStatus LoadCpp(const std::string& name, const std::string& dir);
-  PluginLoadStatus LoadPython(const std::string& name, const std::string& dir);
 
   std::string plugins_dir_;
-  std::unordered_map<std::string, PluginData> loaded_plugins_;
+  std::unordered_map<std::string, std::unique_ptr<PluginData>> loaded_plugins_;
+  bool loaded_plugins_available_ = true;
+  std::shared_mutex loaded_plugins_mut_;
 };
 
 }  // namespace psyche

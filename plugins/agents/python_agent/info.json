@@ -1,4 +1,15 @@
 {
   "name": "python_agent",
-  "language": "python"
+  "language": "python",
+  "functions": [
+    {
+      "name":"set_model_endpoint",
+      "args": {
+        "url": {
+          "type":"string"
+        }
+      }
+    }
+  ]
 }
+  

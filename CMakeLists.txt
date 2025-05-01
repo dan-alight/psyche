@@ -35,6 +35,7 @@ add_executable(Psyche
   src/utils.cc
   src/pyplugin.cc
   src/asyncio_loop.cc
+  src/cppplugin.cc
 )
 
 set_target_properties(Psyche PROPERTIES

@@ -6,6 +6,7 @@
 
 #include "plugin_manager.h"
 #include "pybind11/embed.h"
+#include "pyplugin.h"
 
 namespace psyche {
 namespace py = pybind11;
@@ -22,7 +23,6 @@ void MessageProcessor::Stop() {
 }
 void MessageProcessor::Run() {
   running_ = true;
-  py::gil_scoped_acquire gil;
   Message message;
   auto visitor = [this](auto&& arg) {
     using T = std::decay_t<decltype(arg)>;
@@ -43,8 +43,14 @@ void MessageProcessor::Run() {
 }
 
 void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
-  Plugin* plugin = PluginManager::Get().GetPlugin(command.to);
-  plugin->Invoke(command.sender_channel_id, command.data, command.aux);
+  std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(command.to);
+  if (!holder.has_value()) return;
+  if (holder->type == PluginType::kAgent) {
+    if (holder->language == PluginLanguage::kPython) {
+      auto* plugin = static_cast<PyAgent*>(holder->plugin);
+      plugin->Invoke(command.sender_channel_id, command.data, command.aux, std::move(holder->lock));
+    }
+  }
 }
 
 void MessageProcessor::ProcessPayload(const Payload& payload) {
@@ -56,7 +62,11 @@ void MessageProcessor::ProcessPayload(const Payload& payload) {
     cb(payload);
   } else {
     auto& cb = search->second;
-    cb(payload);
+    try {
+      cb(payload);
+    } catch (const py::error_already_set& e) {
+      std::cerr << "Error in callback: " << e.what() << std::endl;
+    }
   }
 }
 
