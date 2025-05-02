@@ -1,20 +1,19 @@
-from pyplugin import *
+from pyplugin import log, Payload, PayloadFlags, to_string
 import asyncio
 from functools import partial
-from .callback import receive_chat_input
+from psyche_agent.callback import receive_chat_input
 
 _invokable_registry = {}
 
 def invokable(func):
   _invokable_registry[func.__name__] = func
-  func._register_as_invokable = True
   return func
 
 def get_invokable(name):
   return _invokable_registry.get(name)
 
 @invokable
-async def compute(self, channel_id, command, aux):
+async def compute(self, channel_id):
   # Create a new interrupt event for this channel
   event = asyncio.Event()
   self._compute_interrupt_events[channel_id] = event
@@ -34,18 +33,18 @@ async def compute(self, channel_id, command, aux):
     self._compute_interrupt_events.pop(channel_id, None)
 
 @invokable
-def interrupt(self, channel_id, command, aux):
+def interrupt(self, channel_id):
   event = self._compute_interrupt_events.get(channel_id)
   if event:
     event.set()
     log(f"Interrupt signal sent for channel {channel_id}")
 
 @invokable
-def chat_out(self, channel_id, command, aux):
+def chat_out(self, channel_id):
   self.receiving_channels.append(channel_id)
 
 @invokable
-def chat_in(self, channel_id, command, aux):
+def chat_in(self, channel_id):
   new_channel_id = self.interface.get_new_channel_id()
   callback = partial(receive_chat_input, self)
   self.interface.register_callback(new_channel_id, callback)
@@ -53,9 +52,9 @@ def chat_in(self, channel_id, command, aux):
   self.interface.send_payload(Payload(channel_id, new_channel_id, 8, 0, flags))
 
 @invokable
-def set_model_endpoint(self, channel_id, command, aux):
+def set_model_endpoint():
   log("in model settings")
 
 @invokable
-def cout(self, channel_id, command, aux):
-  log(to_string(aux)+"... no way!!!")
+def cout(aux):
+  log(to_string(aux))

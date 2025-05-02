@@ -1,9 +1,11 @@
-from pyplugin import *
+from pyplugin import Agent, PluginInitializeStatus
 import json
 import asyncio
-from .invokable import get_invokable
+from psyche_agent.invokable import get_invokable
+import inspect
+from mem0 import Memory
 
-class PythonAgent(Agent):
+class PsycheAgent(Agent):
   def get_plugin_info(self):
     return "Python Agent v1.0"
 
@@ -17,13 +19,28 @@ class PythonAgent(Agent):
 
   async def invoke(self, channel_id, data, aux):
     command = json.loads(data)
-    invokation = command.get('name')
+    invokation = command.get("name")
     func = get_invokable(invokation)
-    if func:
-      if asyncio.iscoroutinefunction(func):
-        await func(self, channel_id, command, aux)
-      else:
-        func(self, channel_id, command, aux)
+    if not func:
+      return
+    # Build available arguments
+    available_args = {
+        "self": self,
+        "channel_id": channel_id,
+        "command": command,
+        "aux": aux,
+    }
+    # Get the function's parameter names
+    sig = inspect.signature(func)
+    params = sig.parameters
+    # Build the args to pass
+    args_to_pass = [
+        available_args[name] for name in params if name in available_args
+    ]
+    if asyncio.iscoroutinefunction(func):
+      await func(*args_to_pass)
+    else:
+      func(*args_to_pass)
     # else: silently ignore unknown commands (could log or raise)
 
   def initialize(self, agent_interface):

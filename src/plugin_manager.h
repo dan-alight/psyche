@@ -47,18 +47,35 @@ enum class PluginLanguage {
 };
 
 struct PluginData {
+  std::string dir;
   PluginLanguage language;
   PluginType type;
-  PluginLibPtr ptr;
+  PluginLibPtr ptr = nullptr;
   Plugin* plugin;
   std::shared_mutex mut;
-  bool alive;
+  bool alive = true;
 
-  PluginData(PluginLanguage language, PluginType type, Plugin* plugin, PluginLibPtr ptr)
-      : language(language), type(type), ptr(ptr), plugin(plugin), mut(), alive(true) {
+  PluginData(
+      const std::string& dir,
+      PluginLanguage language,
+      PluginType type,
+      Plugin* plugin,
+      PluginLibPtr ptr)
+      : dir(dir),
+        language(language),
+        type(type),
+        ptr(ptr),
+        plugin(plugin) {
   }
-  PluginData(PluginLanguage language, PluginType type, Plugin* plugin)
-      : language(language), type(type), ptr(nullptr), plugin(plugin), mut(), alive(true) {
+  PluginData(
+      const std::string& dir,
+      PluginLanguage language,
+      PluginType type,
+      Plugin* plugin)
+      : dir(dir),
+        language(language),
+        type(type),
+        plugin(plugin) {
   }
 };
 
@@ -89,9 +106,10 @@ class PluginManager {
     static PluginManager& instance = *new PluginManager();
     return instance;
   }
-  PluginLoadStatus Load(const std::string& name, PluginType type);
+  PluginLoadStatus Load(const std::string& dir);
+  // PluginLoadStatus Load(const std::string& dir);
   PluginUnloadStatus Unload(const std::string& name);
-  void SetPluginsDir(const std::string& dir);
+  // void SetPluginsDir(const std::string& dir);
   bool IsLoaded(const std::string& name);
   std::optional<PluginHolder> GetPlugin(const std::string& name);
   void DisablePluginAccess(const std::string& name);
@@ -100,7 +118,7 @@ class PluginManager {
   PluginManager() = default;
   ~PluginManager() = default;
 
-  std::string plugins_dir_;
+  // std::string plugins_dir_;
   std::unordered_map<std::string, std::unique_ptr<PluginData>> loaded_plugins_;
   bool loaded_plugins_available_ = true;
   std::shared_mutex loaded_plugins_mut_;

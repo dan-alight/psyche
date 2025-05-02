@@ -1,4 +1,4 @@
-from pyplugin import *
+from pyplugin import Payload, to_string
 
 def receive_chat_input(self, payload):
   pass

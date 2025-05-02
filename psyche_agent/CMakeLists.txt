@@ -1,8 +1,8 @@
-set(PLUGIN_NAME "python_agent")
+set(PLUGIN_NAME "psyche_agent")
 
 set(TO_COPY
   __init__.py
-  python_agent.py
+  psyche_agent.py
   info.json
   requirements.txt
 )

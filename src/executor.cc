@@ -34,7 +34,7 @@
 namespace psyche {
 namespace py = pybind11;
 namespace {
-constexpr std::string_view kAgentName = "python_agent";
+constexpr std::string_view kAgentName = "psyche_agent";
 }  // namespace
 
 Executor::Executor()
@@ -90,9 +90,9 @@ void Executor::Start() {
 void Executor::StartAgent() {
   std::string exe_dir = GetExecutableDir();
   auto& plugin_manager = PluginManager::Get();
-  auto plugins_dir = exe_dir + "/plugins";
-  plugin_manager.SetPluginsDir(plugins_dir);
-  PluginLoadStatus status = plugin_manager.Load(std::string(kAgentName), PluginType::kAgent);
+  auto plugin_dir = exe_dir + "/psyche_agent";
+  // plugin_manager.SetPluginsDir(plugins_dir);
+  PluginLoadStatus status = plugin_manager.Load(plugin_dir);
   if (status != PluginLoadStatus::kSuccess) {
     spdlog::error("Failed to load plugin: {} with status: {}", kAgentName, static_cast<int>(status));
   }

@@ -1,5 +1,5 @@
 {
-  "name": "basic_chat",
+  "name": "basic_agent",
   "language": "cpp",
   "type": "agent",
   "functions": [

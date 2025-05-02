@@ -1,5 +1,6 @@
 {
-  "name": "python_agent",
+  "name": "psyche_agent",
+  "type": "agent",
   "language": "python",
   "functions": [
     {

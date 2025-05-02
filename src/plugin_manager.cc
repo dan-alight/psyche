@@ -15,33 +15,33 @@
 
 namespace psyche {
 namespace py = pybind11;
-PluginLoadStatus PluginManager::Load(const std::string& name, PluginType type) {
-  if (IsLoaded(name)) {
-    return PluginLoadStatus::kAlreadyLoaded;
-  }
-  std::string type_str;
-  if (type == PluginType::kAgent) {
-    type_str = "agents";
-  } else {
-    type_str = "resources";
-  }
-
-  std::string plugin_dir =
-      plugins_dir_ +
-      "/" + type_str +
-      "/" + name;
-
-  std::string info_path = plugin_dir + "/info.json";
+PluginLoadStatus PluginManager::Load(const std::string& dir) {
+  std::string info_path = dir + "/info.json";
   std::ifstream file(info_path);
   std::ostringstream ss;
   ss << file.rdbuf();
   rapidjson::Document doc;
   doc.Parse(ss.str().c_str());
+  auto* name = doc["name"].GetString();
+
+  if (IsLoaded(name)) {
+    return PluginLoadStatus::kAlreadyLoaded;
+  }
+
   auto* language = doc["language"].GetString();
+  auto* type_str = doc["type"].GetString();
+  PluginType type;
+  if (std::strcmp(type_str, "agent") == 0) {
+    type = PluginType::kAgent;
+  } else if (std::strcmp(type_str, "resource") == 0) {
+    type = PluginType::kResource;
+  } else {
+    return PluginLoadStatus::kInvalidPlugin;
+  }
 
   if (std::strcmp(language, "cpp") == 0) {
     using PluginFactory = Plugin* (*)();
-    std::string plugin_path_without_extension = plugin_dir + "/" + name;
+    std::string plugin_path_without_extension = dir + "/" + name;
     std::string full_path;
 #if defined(_WIN32)
     full_path = plugin_path_without_extension + ".dll";
@@ -112,7 +112,7 @@ PluginLoadStatus PluginManager::Load(const std::string& name, PluginType type) {
 
     loaded_plugins_.emplace(
         name,
-        std::make_unique<PluginData>(PluginLanguage::kCpp, type, plugin, lib_ptr));
+        std::make_unique<PluginData>(dir, PluginLanguage::kCpp, type, plugin, lib_ptr));
 
   } else if (std::strcmp(language, "python") == 0) {
     py::gil_scoped_acquire gil;
@@ -120,12 +120,12 @@ PluginLoadStatus PluginManager::Load(const std::string& name, PluginType type) {
     py::module_ importlib = py::module_::import("importlib");
     py::module_ os = py::module_::import("os");
 
-    std::string venv_path = plugin_dir + "/venv";
+    std::string venv_path = dir + "/venv";
     if (!std::filesystem::exists(venv_path)) {
       std::string command = "python -m venv " + venv_path;
       std::system(command.c_str());
     }
-    std::string requirements_file = plugin_dir + "/requirements.txt";
+    std::string requirements_file = dir + "/requirements.txt";
     if (std::filesystem::exists(requirements_file)) {
       std::string marker_file = venv_path + "/.deps_installed";
       if (!std::filesystem::exists(marker_file) ||
@@ -142,20 +142,24 @@ PluginLoadStatus PluginManager::Load(const std::string& name, PluginType type) {
     }
 
     // When each plugin has a sub-interpreter, don't need to worry about sys.path clutter
-    std::string parent_dir = std::filesystem::path(plugin_dir).parent_path().string();
+    std::string parent_dir = std::filesystem::path(dir).parent_path().string();
     std::string site_packages = venv_path + "/lib/site-packages";
     py::list sys_path = sys.attr("path").cast<py::list>();
-    sys_path.append(parent_dir);
-    sys_path.append(site_packages);
+    sys_path.insert(0, parent_dir);
+    sys_path.insert(0, site_packages);
+#if defined(_WIN32)
+    sys_path.insert(0, venv_path + "/Lib/site-packages/win32/lib");
+    sys_path.insert(0, venv_path + "/Lib/site-packages/win32");
+#endif
     try {
-      py::module_ mod = py::module_::import(name.c_str());
+      py::module_ mod = py::module_::import(name);
       py::object plugin_class = mod.attr(SnakeToPascal(name).c_str());
       py::object instance = plugin_class();
 
       Plugin* plugin = instance.cast<std::unique_ptr<Plugin>>().release();
       loaded_plugins_.emplace(
           name,
-          std::make_unique<PluginData>(PluginLanguage::kPython, type, plugin));
+          std::make_unique<PluginData>(dir, PluginLanguage::kPython, type, plugin));
     } catch (const py::error_already_set& e) {
       std::cerr << "Error importing module: " << e.what() << std::endl;
       return PluginLoadStatus::kInvalidPlugin;
@@ -163,6 +167,18 @@ PluginLoadStatus PluginManager::Load(const std::string& name, PluginType type) {
   }
   return PluginLoadStatus::kSuccess;
 }
+
+/* PluginLoadStatus PluginManager::Load(const std::string& dir) {
+  std::string info_path = dir + "/info.json";
+  std::ifstream file(info_path);
+  std::ostringstream ss;
+  ss << file.rdbuf();
+  rapidjson::Document doc;
+  doc.Parse(ss.str().c_str());
+  auto* name = doc["name"].GetString();
+
+  return Load(name, PluginType::kAgent);
+} */
 
 PluginUnloadStatus PluginManager::Unload(const std::string& name) {
   auto it = loaded_plugins_.find(name);
@@ -209,21 +225,17 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
       }
 
       // Remove sys.path entries that were appended in LoadPython
-      std::string parent_dir = std::filesystem::path(plugins_dir_ + "/agents/" + name).parent_path().string();
-      std::string venv_path = plugins_dir_ + "/agents/" + name + "/venv";
+      std::string parent_dir = std::filesystem::path(plugin_data.dir).parent_path().string();
+      std::string venv_path = plugin_data.dir + "/venv";
       std::string site_packages = venv_path + "/lib/site-packages";
       py::list sys_path = sys.attr("path").cast<py::list>();
-      try {
-        sys_path.attr("remove")(parent_dir);
-      } catch (const py::error_already_set& e) {
-        if (!e.matches(PyExc_ValueError)) throw;
-      }
 
-      try {
-        sys_path.attr("remove")(site_packages);
-      } catch (const py::error_already_set& e) {
-        if (!e.matches(PyExc_ValueError)) throw;
-      }
+#if defined(_WIN32)
+      sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32");
+      sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32/lib");
+#endif
+      sys_path.attr("remove")(parent_dir);
+      sys_path.attr("remove")(site_packages);
 
       // Optionally: force garbage collection
       py::module_ gc = py::module_::import("gc");
@@ -242,9 +254,9 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
   return PluginUnloadStatus::kSuccess;
 }
 
-void PluginManager::SetPluginsDir(const std::string& dir) {
+/* void PluginManager::SetPluginsDir(const std::string& dir) {
   plugins_dir_ = dir;
-}
+} */
 
 bool PluginManager::IsLoaded(const std::string& name) {
   return loaded_plugins_.contains(name);

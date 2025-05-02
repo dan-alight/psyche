@@ -1,7 +1,7 @@
-set(PLUGIN_NAME "default_agent")
+set(PLUGIN_NAME "basic_agent")
 
 add_library(${PLUGIN_NAME} SHARED
-  default_agent.cc
+  basic_agent.cc
 )
 
 set(TO_COPY
