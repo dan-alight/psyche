@@ -31,6 +31,13 @@ void WebSocketsServer::Stop() {
 
   loop_->defer([this]() {
     us_listen_socket_close(0, listen_socket_);
+    std::vector<uWS::WebSocket<false, true, PerSocketData>*> sockets;
+    for (const auto& [id, ws] : open_websockets_) {
+      sockets.push_back(ws);
+    }
+    for (auto* ws : sockets) {
+      ws->end();
+    }
   });
 
   server_thread_.join();
@@ -43,14 +50,19 @@ void WebSocketsServer::StartServer() {
     auto* user_data = ws->getUserData();
     int id = num_websocket_ids_++;
     user_data->id = id;
-    open_websockets_.insert(id);
+    open_websockets_[id] = ws;
     std::cout << "Connection opened" << std::endl;
   };
   auto message = [this](auto* ws, std::string_view message, uWS::OpCode opCode) {
     rapidjson::Document doc;
-    doc.Parse(message.data(), message.size());
+    try {
+      doc.Parse(message.data(), message.size());
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to parse message: " << e.what() << std::endl;
+      return;
+    }
 
-    std::string msg_type = doc["msg_type"].GetString();
+    std::string msg_type = doc["type"].GetString();
     if (msg_type == "get_new_channel_id") {
       constexpr size_t header_size = sizeof(char);
       int64_t new_channel_id = message_processor_.GetNewChannelId();

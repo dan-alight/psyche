@@ -1,7 +1,7 @@
 #ifndef PSYCHE_WEBSOCKETS_SERVER_H_
 #define PSYCHE_WEBSOCKETS_SERVER_H_
 
-#include <unordered_set>
+#include <unordered_map>
 
 #include "libusockets.h"
 #include "message_processor.h"
@@ -26,7 +26,7 @@ class WebSocketsServer {
   us_listen_socket_t* listen_socket_ = nullptr;
   std::thread server_thread_;
   int num_websocket_ids_ = 0;
-  std::unordered_set<int> open_websockets_;
+  std::unordered_map<int, uWS::WebSocket<false,true,PerSocketData>*> open_websockets_;
 };
 }  // namespace psyche
 

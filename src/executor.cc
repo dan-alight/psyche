@@ -54,6 +54,8 @@ void Executor::Start() {
   auto logger = std::make_shared<spdlog::logger>("", sinks.begin(), sinks.end());
   spdlog::set_default_logger(logger);
 
+  websockets_server_.Start();
+
   asyncio_loop_ = std::make_shared<AsyncioLoop>();
   asyncio_loop_->Start();
 
@@ -84,7 +86,9 @@ void Executor::Start() {
     }
   }
   message_processor_.Stop();
+  StopAgent();
   asyncio_loop_->Stop();
+  websockets_server_.Stop();
 }
 
 void Executor::StartAgent() {
@@ -122,10 +126,8 @@ void Executor::StartAgent() {
   agent_interface.internal.py_register_callback =
       [this](int64_t channel_id, py::object callback) -> void {
     auto callback_wrapper = [this, callback](Payload payload) {
-      py::gil_scoped_acquire gil;
-
       std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(std::string(kAgentName));
-
+      py::gil_scoped_acquire gil;
       py::args args = py::make_tuple(py::cast(payload));
       asyncio_loop_->ScheduleFunction(std::move(holder->lock), callback, args);
     };

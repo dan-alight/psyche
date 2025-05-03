@@ -68,7 +68,7 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
       int64_t channel_id,
       std::string data,
       std::shared_ptr<void> aux,
-      std::shared_lock<std::shared_mutex>&& lock);
+      std::shared_lock<std::shared_mutex> lock);
 
   void StopStream(int64_t channel_id) override;
   PluginInitializeStatus Initialize(AgentInterface agent_interface) override;

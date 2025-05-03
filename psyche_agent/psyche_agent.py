@@ -1,16 +1,16 @@
-from pyplugin import Agent, PluginInitializeStatus
+from pyplugin import Agent, PluginInitializeStatus, log, to_string
 import json
 import asyncio
 from psyche_agent.invokable import get_invokable
+from psyche_agent.db import get_connection, close_connection
 import inspect
-from mem0 import Memory
 
 class PsycheAgent(Agent):
   def get_plugin_info(self):
     return "Python Agent v1.0"
 
-  def uninitialize(self):
-    pass
+  async def uninitialize(self):
+    await close_connection()
 
   def stop_stream(self, channel_id):
     self.receiving_channels = [
@@ -25,7 +25,7 @@ class PsycheAgent(Agent):
       return
     # Build available arguments
     available_args = {
-        "self": self,
+        "self": self,        
         "channel_id": channel_id,
         "command": command,
         "aux": aux,
@@ -43,10 +43,14 @@ class PsycheAgent(Agent):
       func(*args_to_pass)
     # else: silently ignore unknown commands (could log or raise)
 
-  def initialize(self, agent_interface):
+  async def initialize(self, agent_interface):
     self.interface = agent_interface
     self.receiving_channels = []
     self._compute_interrupt_events = {}    # channel_id -> asyncio.Event
+    
+    # Initialize database connection
+    await get_connection()
+    
     return PluginInitializeStatus.SUCCESS
 
   def plugin_added(self, plugin_info):

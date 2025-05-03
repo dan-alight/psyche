@@ -2,6 +2,7 @@ from pyplugin import log, Payload, PayloadFlags, to_string
 import asyncio
 from functools import partial
 from psyche_agent.callback import receive_chat_input
+from openai import AsyncOpenAI
 
 _invokable_registry = {}
 
@@ -52,8 +53,10 @@ def chat_in(self, channel_id):
   self.interface.send_payload(Payload(channel_id, new_channel_id, 8, 0, flags))
 
 @invokable
-def set_model_endpoint():
-  log("in model settings")
+def set_openai_api_key(self, command):
+  api_key = command.get("api_key")
+  self.client = AsyncOpenAI(api_key=api_key)
+  log(str(self.client))
 
 @invokable
 def cout(aux):

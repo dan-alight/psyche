@@ -72,7 +72,7 @@ py::object AsyncioLoop::RunSync(
 }
 
 void AsyncioLoop::ScheduleFunction(
-    std::shared_lock<std::shared_mutex>&& lock,
+    std::shared_lock<std::shared_mutex> lock,
     py::object func,
     std::optional<py::args> args,
     std::optional<py::kwargs> kwargs) {
@@ -83,9 +83,7 @@ void AsyncioLoop::ScheduleFunction(
   auto lock_ptr = std::make_shared<std::shared_lock<std::shared_mutex>>(std::move(lock));
   if (IsCoroutine(func)) {
     py::object future = asyncio.attr("run_coroutine_threadsafe")(func(*safe_args, **safe_kwargs), loop_);
-    auto py_done_callback = py::cpp_function([lock_ptr](py::object) {
-      int i = 0;
-    });
+    auto py_done_callback = py::cpp_function([lock_ptr](py::object) {});
     future.attr("add_done_callback")(py_done_callback);
   } else {
     auto wrapper = [func, safe_args, safe_kwargs, lock_ptr]() {

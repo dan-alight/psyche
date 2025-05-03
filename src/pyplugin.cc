@@ -37,7 +37,7 @@ void PyAgent::Invoke(
     int64_t channel_id,
     std::string data,
     std::shared_ptr<void> aux,
-    std::shared_lock<std::shared_mutex>&& lock) {
+    std::shared_lock<std::shared_mutex> lock) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "invoke");
   try {
@@ -58,9 +58,14 @@ void PyAgent::StopStream(int64_t channel_id) {
 PluginInitializeStatus PyAgent::Initialize(AgentInterface agent_interface) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "initialize");
-  py::object result = asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
-  auto status = result.cast<PluginInitializeStatus>();
-  return status;
+  try {
+    py::object result = asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
+    auto status = result.cast<PluginInitializeStatus>();
+    return status;
+  } catch (const std::exception& e) {
+    std::cerr << "Error in Initialize: " << e.what() << std::endl;
+  }
+  return PluginInitializeStatus::kError;
 }
 
 void PyAgent::PluginAdded(std::string plugin_info) {

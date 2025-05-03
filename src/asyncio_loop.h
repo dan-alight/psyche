@@ -27,7 +27,7 @@ class AsyncioLoop {
       std::optional<py::args> args = std::nullopt,
       std::optional<py::kwargs> kwargs = std::nullopt);
   void ScheduleFunction(
-      std::shared_lock<std::shared_mutex>&& lock,
+      std::shared_lock<std::shared_mutex> lock,
       py::object func,
       std::optional<py::args> args = std::nullopt,
       std::optional<py::kwargs> kwargs = std::nullopt);
