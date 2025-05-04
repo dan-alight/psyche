@@ -16,7 +16,6 @@ namespace psyche {
 namespace py = pybind11;
 class AsyncioLoop {
  public:
-  AsyncioLoop();
   void Start();
   void Stop();
 

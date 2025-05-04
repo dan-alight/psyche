@@ -10,6 +10,10 @@
 
 namespace psyche {
 namespace py = pybind11;
+MessageProcessor::MessageProcessor(CommandHandler& command_handler)
+    : command_handler_(command_handler) {
+}
+
 void MessageProcessor::Start() {
   processor_thread_ = std::thread(&MessageProcessor::Run, this);
 }
@@ -43,6 +47,11 @@ void MessageProcessor::Run() {
 }
 
 void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
+  if (command.to == "host") {
+    command_handler_.Invoke(command.sender_channel_id, command.data, command.aux);
+    return;
+  }
+
   std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(command.to);
   if (!holder.has_value()) return;
   if (holder->type == PluginType::kAgent) {

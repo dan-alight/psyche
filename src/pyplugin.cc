@@ -11,10 +11,11 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 #include "resource.h"
+#include "spdlog/spdlog.h"
 
 namespace psyche {
 
-void PyAgent::SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
+void PyAgent::SetLoop(AsyncioLoop* asyncio_loop) {
   asyncio_loop_ = asyncio_loop;
 }
 std::string PyAgent::GetPluginInfo() {
@@ -43,9 +44,7 @@ void PyAgent::Invoke(
   try {
     asyncio_loop_->ScheduleFunction(std::move(lock), override, py::make_tuple(channel_id, data, aux));
   } catch (const std::exception& e) {
-    std::cerr << "Error in Invoke: " << e.what() << std::endl;
-  } catch (...) {
-    std::cerr << "Unknown error in Invoke" << std::endl;
+    spdlog::error("Error in PyAgent Invoke: {}", e.what());
   }
 }
 
@@ -63,7 +62,7 @@ PluginInitializeStatus PyAgent::Initialize(AgentInterface agent_interface) {
     auto status = result.cast<PluginInitializeStatus>();
     return status;
   } catch (const std::exception& e) {
-    std::cerr << "Error in Initialize: " << e.what() << std::endl;
+    spdlog::error("Error in PyAgent Initialize: {}", e.what());
   }
   return PluginInitializeStatus::kError;
 }
@@ -254,8 +253,7 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def(py::init<>());
 
   py::class_<Resource, Plugin, PyResource, py::smart_holder>(m, "Resource")
-      .def(py::init<>())
-      .def("initialize", &Resource::Initialize);
+      .def(py::init<>());
 
   m.def("log", &CppPrint);
   m.def("to_int", &ConvertSharedVoidPtr<int>);

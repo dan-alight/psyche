@@ -11,6 +11,7 @@
 #include "plugin.h"
 #include "pybind11/pybind11.h"
 #include "rapidjson/document.h"
+#include "spdlog/spdlog.h"
 #include "utils.h"
 
 namespace psyche {
@@ -22,14 +23,14 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
   ss << file.rdbuf();
   rapidjson::Document doc;
   doc.Parse(ss.str().c_str());
-  auto* name = doc["name"].GetString();
+  const char* name = doc["name"].GetString();
 
   if (IsLoaded(name)) {
     return PluginLoadStatus::kAlreadyLoaded;
   }
 
-  auto* language = doc["language"].GetString();
-  auto* type_str = doc["type"].GetString();
+  const char* language = doc["language"].GetString();
+  const char* type_str = doc["type"].GetString();
   PluginType type;
   if (std::strcmp(type_str, "agent") == 0) {
     type = PluginType::kAgent;
@@ -161,24 +162,12 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
           name,
           std::make_unique<PluginData>(dir, PluginLanguage::kPython, type, plugin));
     } catch (const py::error_already_set& e) {
-      std::cerr << "Error importing module: " << e.what() << std::endl;
+      spdlog::error("Error importing Python plugin: {}", e.what());
       return PluginLoadStatus::kInvalidPlugin;
     }
   }
   return PluginLoadStatus::kSuccess;
 }
-
-/* PluginLoadStatus PluginManager::Load(const std::string& dir) {
-  std::string info_path = dir + "/info.json";
-  std::ifstream file(info_path);
-  std::ostringstream ss;
-  ss << file.rdbuf();
-  rapidjson::Document doc;
-  doc.Parse(ss.str().c_str());
-  auto* name = doc["name"].GetString();
-
-  return Load(name, PluginType::kAgent);
-} */
 
 PluginUnloadStatus PluginManager::Unload(const std::string& name) {
   auto it = loaded_plugins_.find(name);
@@ -242,7 +231,7 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
       gc.attr("collect")();
 
     } catch (const py::error_already_set& e) {
-      std::cerr << "Error unloading Python plugin: " << e.what() << std::endl;
+      spdlog::error("Error unloading Python plugin: {}", e.what());
       return PluginUnloadStatus::kUnloadError;
     }
   }
@@ -253,10 +242,6 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
 
   return PluginUnloadStatus::kSuccess;
 }
-
-/* void PluginManager::SetPluginsDir(const std::string& dir) {
-  plugins_dir_ = dir;
-} */
 
 bool PluginManager::IsLoaded(const std::string& name) {
   return loaded_plugins_.contains(name);

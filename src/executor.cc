@@ -25,8 +25,6 @@
 #include "pybind11/embed.h"
 #include "pyplugin.h"
 #include "resource.h"
-#include "spdlog/sinks/basic_file_sink.h"
-#include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 #include "utils.h"
 #include "uwebsockets/App.h"
@@ -38,30 +36,19 @@ constexpr std::string_view kAgentName = "psyche_agent";
 }  // namespace
 
 Executor::Executor()
-    : websockets_server_(message_processor_) {
+    : command_handler_(data_store_),
+      message_processor_(command_handler_),
+      websockets_server_(message_processor_) {
 }
 
 void Executor::Start() {
   py::scoped_interpreter interpreter_;
   py::gil_scoped_release release;
-
-  // Create a logger with multiple sinks
-  std::string exe_dir = GetExecutableDir();
-  auto log_file_path = exe_dir + "/logs/psyche.log";
-  auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path);
-  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-  std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
-  auto logger = std::make_shared<spdlog::logger>("", sinks.begin(), sinks.end());
-  spdlog::set_default_logger(logger);
-
   websockets_server_.Start();
-
-  asyncio_loop_ = std::make_shared<AsyncioLoop>();
-  asyncio_loop_->Start();
-
+  asyncio_loop_.Start();
   StartAgent();
-
   message_processor_.Start();
+
   std::string command;
   while (true) {
     std::getline(std::cin, command);
@@ -85,24 +72,22 @@ void Executor::Start() {
       message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data});
     }
   }
+
   message_processor_.Stop();
   StopAgent();
-  asyncio_loop_->Stop();
+  asyncio_loop_.Stop();
   websockets_server_.Stop();
 }
 
 void Executor::StartAgent() {
   std::string exe_dir = GetExecutableDir();
   auto& plugin_manager = PluginManager::Get();
-  auto plugin_dir = exe_dir + "/psyche_agent";
+  auto plugin_dir = exe_dir + "/" + std::string(kAgentName);
   // plugin_manager.SetPluginsDir(plugins_dir);
-  PluginLoadStatus status = plugin_manager.Load(plugin_dir);
-  if (status != PluginLoadStatus::kSuccess) {
-    spdlog::error("Failed to load plugin: {} with status: {}", kAgentName, static_cast<int>(status));
-  }
+  plugin_manager.Load(plugin_dir);
   std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
   PyPlugin* pyplugin = static_cast<PyPlugin*>((*holder).plugin);
-  pyplugin->SetLoop(asyncio_loop_);
+  pyplugin->SetLoop(&asyncio_loop_);
   Agent* agent = static_cast<Agent*>((*holder).plugin);
 
   AgentInterface agent_interface;
@@ -129,12 +114,12 @@ void Executor::StartAgent() {
       std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(std::string(kAgentName));
       py::gil_scoped_acquire gil;
       py::args args = py::make_tuple(py::cast(payload));
-      asyncio_loop_->ScheduleFunction(std::move(holder->lock), callback, args);
+      asyncio_loop_.ScheduleFunction(std::move(holder->lock), callback, args);
     };
     message_processor_.RegisterCallback(channel_id, std::move(callback_wrapper));
   };
   agent->Initialize(agent_interface);
-  spdlog::info("Plugin {} initialized", kAgentName);
+  std::cout << "Plugin " << kAgentName << " initialized" << std::endl;
 
   int64_t generic_id = message_processor_.GetNewChannelId();
   chat_send_id_ = -1;
@@ -165,10 +150,10 @@ void Executor::StopAgent() {
   std::shared_mutex* mut = holder->lock.mutex();
   // Get a lock on the plugin. This will block until all current/queued plugin calls complete
   std::unique_lock<std::shared_mutex> lock(*mut);
-
+  lock.unlock();
   agent->Uninitialize();
   plugin_manager.Unload(std::string(kAgentName));
-  spdlog::info("Plugin {} unloaded", kAgentName);
+  std::cout << "Plugin " << kAgentName << " unloaded" << std::endl;
 }
 
 }  // namespace psyche

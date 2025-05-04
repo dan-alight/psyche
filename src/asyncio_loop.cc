@@ -1,12 +1,9 @@
 #include "asyncio_loop.h"
 
+#include "spdlog/spdlog.h"
+
 namespace psyche {
 namespace py = pybind11;
-
-AsyncioLoop::AsyncioLoop() {
-  py::gil_scoped_acquire gil;
-  loop_ = py::none();
-}
 
 void AsyncioLoop::Start() {
   thread_ = std::thread(&AsyncioLoop::Run, this);
@@ -112,11 +109,11 @@ void AsyncioLoop::Run() {
       loop_.attr("run_until_complete")(loop_.attr("shutdown_asyncgens")());
       loop_.attr("close")();
     } catch (const py::error_already_set& e) {
-      std::cerr << "Python error in shutdown: " << e.what() << std::endl;
+      spdlog::error("Python error in shutdown: {}", e.what());
     }
 
   } catch (const py::error_already_set& e) {
-    std::cerr << "Python error in event loop: " << e.what() << std::endl;
+    spdlog::error("Python error in event loop: {}", e.what());
   }
 }
 

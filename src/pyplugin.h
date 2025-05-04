@@ -59,7 +59,7 @@ struct type_caster<std::shared_ptr<void>> {
 namespace psyche {
 class PyAgent : public Agent, public py::trampoline_self_life_support {
  public:
-  void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop);
+  void SetLoop(AsyncioLoop* asyncio_loop);
   std::string GetPluginInfo() override;
   void Uninitialize() override;
 
@@ -76,7 +76,7 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
   void PluginRemoved(std::string name) override;
 
  private:
-  std::shared_ptr<AsyncioLoop> asyncio_loop_;
+  AsyncioLoop* asyncio_loop_;
 };
 }  // namespace psyche
 
@@ -85,7 +85,7 @@ namespace py = pybind11;
 
 class PyPlugin : public Plugin, public py::trampoline_self_life_support {
  public:
-  void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
+  void SetLoop(AsyncioLoop* asyncio_loop) {
     asyncio_loop_ = asyncio_loop;
   }
   std::string GetPluginInfo() override {
@@ -102,7 +102,7 @@ class PyPlugin : public Plugin, public py::trampoline_self_life_support {
   }
 
  private:
-  std::shared_ptr<AsyncioLoop> asyncio_loop_;
+  AsyncioLoop* asyncio_loop_;
 };
 
 class PyResource : public Resource, public py::trampoline_self_life_support {

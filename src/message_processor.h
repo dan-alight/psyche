@@ -8,11 +8,13 @@
 
 #include "blockingconcurrentqueue.h"
 #include "host_interface.h"
+#include "command_handler.h"
 
 namespace psyche {
 
 class MessageProcessor {
  public:
+  MessageProcessor(CommandHandler& command_handler);
   void Start();
   void Stop();
   template <typename T>
@@ -42,6 +44,7 @@ class MessageProcessor {
   void ProcessInvokeCommand(const InvokeCommand& command);
   void ProcessPayload(const Payload& payload);
 
+  CommandHandler& command_handler_;
   bool running_ = false;
   moodycamel::BlockingConcurrentQueue<Message> message_queue_;
   std::thread processor_thread_;
