@@ -8,6 +8,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "spdlog/spdlog.h"
 #include "uwebsockets/App.h"
 #include "uwebsockets/Loop.h"
 
@@ -48,15 +49,24 @@ void WebSocketsServer::OnOpen(WebSocket* ws) {
   int id = num_websocket_ids_++;
   user_data->id = id;
   open_websockets_[id] = ws;
-  std::cout << "Connection opened" << std::endl;
+  spdlog::info("WebSocket opened with id: {}", id);
 }
 
 void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::OpCode opCode) {
   rapidjson::Document doc;
-  try {
-    doc.Parse(message.data(), message.size());
-  } catch (const std::exception& e) {
-    std::cerr << "Failed to parse message: " << e.what() << std::endl;
+  doc.Parse(message.data(), message.size());
+  if (doc.HasParseError()) {
+    spdlog::warn("Failed to parse message: error code {}", static_cast<int>(doc.GetParseError()));
+    return;
+  }
+
+  if (!doc.IsObject()) {
+    spdlog::warn("Message is not a JSON object");
+    return;
+  }
+
+  if (!doc.HasMember("type") || !doc["type"].IsString()) {
+    spdlog::warn("Message missing 'type' field or 'type' is not a string");
     return;
   }
 
@@ -70,8 +80,22 @@ void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::O
     ws->send(std::string_view(response.data(), response.size()), uWS::OpCode::BINARY);
 
   } else if (msg_type == "invoke") {
+    if (!doc.HasMember("channel_id") || !doc["channel_id"].IsInt64()) {
+      spdlog::warn("Message missing 'channel_id' or 'channel_id' is not an int64");
+      return;
+    }
     int64_t channel_id = doc["channel_id"].GetInt64();
+
+    if (!doc.HasMember("to") || !doc["to"].IsString()) {
+      spdlog::warn("Message missing 'to' or 'to' is not a string");
+      return;
+    }
     const char* to = doc["to"].GetString();
+
+    if (!doc.HasMember("data") || !doc["data"].IsObject()) {
+      spdlog::warn("Message missing 'data' or 'data' is not an object");
+      return;
+    }
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     doc["data"].Accept(writer);
@@ -107,10 +131,10 @@ void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::O
 
 void WebSocketsServer::OnListen(us_listen_socket_t* token) {
   if (token) {
-    std::cout << "WebSocket server listening on port " << kPortNum << std::endl;
+    spdlog::info("Listening on port {}", kPortNum);
     listen_socket_ = token;
   } else {
-    std::cerr << "Failed to listen on port " << kPortNum << std::endl;
+    spdlog::error("Failed to listen on port {}", kPortNum);
   }
 }
 
@@ -118,6 +142,7 @@ void WebSocketsServer::OnClose(WebSocket* ws, int /*code*/, std::string_view /*m
   PerSocketData* user_data = ws->getUserData();
   int id = user_data->id;
   open_websockets_.erase(id);
+  spdlog::info("WebSocket closed with id: {}", id);
 }
 
 void WebSocketsServer::StartServer() {

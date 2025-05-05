@@ -19,24 +19,56 @@ namespace py = pybind11;
 PluginLoadStatus PluginManager::Load(const std::string& dir) {
   std::string info_path = dir + "/info.json";
   std::ifstream file(info_path);
+  if (!file.is_open()) {
+    spdlog::warn("Could not open plugin info file: {}", info_path);
+    return PluginLoadStatus::kInvalidPlugin;
+  }
+
   std::ostringstream ss;
   ss << file.rdbuf();
+  std::string json_str = ss.str();
+
   rapidjson::Document doc;
-  doc.Parse(ss.str().c_str());
+  doc.Parse(json_str.c_str());
+  if (doc.HasParseError()) {
+    spdlog::warn("Failed to parse plugin info.json: error code {}", static_cast<int>(doc.GetParseError()));
+    return PluginLoadStatus::kInvalidPlugin;
+  }
+
+  if (!doc.IsObject()) {
+    spdlog::warn("Plugin info.json is not a JSON object");
+    return PluginLoadStatus::kInvalidPlugin;
+  }
+
+  if (!doc.HasMember("name") || !doc["name"].IsString()) {
+    spdlog::warn("Plugin info.json missing 'name' or 'name' is not a string");
+    return PluginLoadStatus::kInvalidPlugin;
+  }
   const char* name = doc["name"].GetString();
 
   if (IsLoaded(name)) {
     return PluginLoadStatus::kAlreadyLoaded;
   }
 
+  if (!doc.HasMember("language") || !doc["language"].IsString()) {
+    spdlog::warn("Plugin info.json missing 'language' or 'language' is not a string");
+    return PluginLoadStatus::kInvalidPlugin;
+  }
   const char* language = doc["language"].GetString();
+
+  if (!doc.HasMember("type") || !doc["type"].IsString()) {
+    spdlog::warn("Plugin info.json missing 'type' or 'type' is not a string");
+    return PluginLoadStatus::kInvalidPlugin;
+  }
   const char* type_str = doc["type"].GetString();
+
   PluginType type;
   if (std::strcmp(type_str, "agent") == 0) {
     type = PluginType::kAgent;
   } else if (std::strcmp(type_str, "resource") == 0) {
     type = PluginType::kResource;
   } else {
+    spdlog::warn("Plugin info.json has invalid 'type': {}", type_str);
     return PluginLoadStatus::kInvalidPlugin;
   }
 
@@ -162,9 +194,12 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
           name,
           std::make_unique<PluginData>(dir, PluginLanguage::kPython, type, plugin));
     } catch (const py::error_already_set& e) {
-      spdlog::error("Error importing Python plugin: {}", e.what());
+      spdlog::error("Error loading Python plugin: {}", e.what());
       return PluginLoadStatus::kInvalidPlugin;
     }
+  } else {
+    spdlog::warn("Plugin info.json has invalid 'language': {}", language);
+    return PluginLoadStatus::kInvalidPlugin;
   }
   return PluginLoadStatus::kSuccess;
 }
@@ -251,9 +286,8 @@ std::optional<PluginHolder> PluginManager::GetPlugin(const std::string& name) {
   if (!loaded_plugins_available_) return {};
   std::shared_lock lock(loaded_plugins_mut_);
   auto it = loaded_plugins_.find(name);
-  if (it == loaded_plugins_.end()) {
-    return {};
-  }
+  if (it == loaded_plugins_.end()) return {};
+
   auto& plugin_data = *it->second;
   if (!plugin_data.alive) return {};
 

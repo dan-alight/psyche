@@ -84,7 +84,13 @@ void Executor::StartAgent() {
   auto& plugin_manager = PluginManager::Get();
   auto plugin_dir = exe_dir + "/" + std::string(kAgentName);
   // plugin_manager.SetPluginsDir(plugins_dir);
-  plugin_manager.Load(plugin_dir);
+
+  PluginLoadStatus load_status = plugin_manager.Load(plugin_dir);
+  if (load_status != PluginLoadStatus::kSuccess) {
+    spdlog::error("Failed to load plugin: {}", std::string(kAgentName));
+    return;
+  }
+
   std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
   PyPlugin* pyplugin = static_cast<PyPlugin*>((*holder).plugin);
   pyplugin->SetLoop(&asyncio_loop_);
@@ -118,8 +124,9 @@ void Executor::StartAgent() {
     };
     message_processor_.RegisterCallback(channel_id, std::move(callback_wrapper));
   };
-  agent->Initialize(agent_interface);
-  std::cout << "Plugin " << kAgentName << " initialized" << std::endl;
+  PluginInitializeStatus status = agent->Initialize(agent_interface);
+  if (status == PluginInitializeStatus::kSuccess)
+    spdlog::info("Agent {} initialized", kAgentName);
 
   int64_t generic_id = message_processor_.GetNewChannelId();
   chat_send_id_ = -1;
@@ -141,6 +148,8 @@ void Executor::StartAgent() {
 void Executor::StopAgent() {
   auto& plugin_manager = PluginManager::Get();
   std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
+  if (!holder) return;
+
   Plugin* plugin = holder->plugin;
   Agent* agent = static_cast<Agent*>(plugin);
 
@@ -152,8 +161,9 @@ void Executor::StopAgent() {
   std::unique_lock<std::shared_mutex> lock(*mut);
   lock.unlock();
   agent->Uninitialize();
-  plugin_manager.Unload(std::string(kAgentName));
-  std::cout << "Plugin " << kAgentName << " unloaded" << std::endl;
+  PluginUnloadStatus status = plugin_manager.Unload(std::string(kAgentName));
+  if (status == PluginUnloadStatus::kSuccess)
+    spdlog::info("Plugin {} unloaded successfully", std::string(kAgentName));
 }
 
 }  // namespace psyche

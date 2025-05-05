@@ -7,6 +7,7 @@
 #include "plugin_manager.h"
 #include "pybind11/embed.h"
 #include "pyplugin.h"
+#include "spdlog/spdlog.h"
 
 namespace psyche {
 namespace py = pybind11;
@@ -53,7 +54,11 @@ void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
   }
 
   std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(command.to);
-  if (!holder.has_value()) return;
+  if (!holder.has_value()) {
+    spdlog::warn("Could not process InvokeCommand. Plugin {} not available", command.to);
+    return;
+  }
+
   if (holder->type == PluginType::kAgent) {
     if (holder->language == PluginLanguage::kPython) {
       auto* plugin = static_cast<PyAgent*>(holder->plugin);

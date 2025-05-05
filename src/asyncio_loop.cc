@@ -92,28 +92,27 @@ void AsyncioLoop::ScheduleFunction(
 
 void AsyncioLoop::Run() {
   py::gil_scoped_acquire gil;
+
+  py::module_ asyncio = py::module_::import("asyncio");
+  py::module_ selectors = py::module_::import("selectors");
+
+  py::object selector = selectors.attr("DefaultSelector")();
+  loop_ = asyncio.attr("SelectorEventLoop")(selector);
+  asyncio.attr("set_event_loop")(loop_);
+
+  ready_ = true;
+  cv_.notify_one();
+
   try {
-    py::module_ asyncio = py::module_::import("asyncio");
-    py::module_ selectors = py::module_::import("selectors");
-
-    py::object selector = selectors.attr("DefaultSelector")();
-    loop_ = asyncio.attr("SelectorEventLoop")(selector);
-    asyncio.attr("set_event_loop")(loop_);
-
-    ready_ = true;
-    cv_.notify_one();
-
     loop_.attr("run_forever")();
-
-    try {
-      loop_.attr("run_until_complete")(loop_.attr("shutdown_asyncgens")());
-      loop_.attr("close")();
-    } catch (const py::error_already_set& e) {
-      spdlog::error("Python error in shutdown: {}", e.what());
-    }
-
   } catch (const py::error_already_set& e) {
-    spdlog::error("Python error in event loop: {}", e.what());
+    spdlog::error("Error in Python event loop: {}", e.what());
+  }
+  try {
+    loop_.attr("run_until_complete")(loop_.attr("shutdown_asyncgens")());
+    loop_.attr("close")();
+  } catch (const py::error_already_set& e) {
+    spdlog::error("Error in Python shutdown: {}", e.what());
   }
 }
 
