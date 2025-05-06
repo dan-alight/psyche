@@ -39,6 +39,7 @@ Executor::Executor()
     : command_handler_(data_store_),
       message_processor_(command_handler_),
       websockets_server_(message_processor_) {
+  command_handler_.SetMessageProcessor(&message_processor_);
 }
 
 void Executor::Start() {
@@ -122,25 +123,29 @@ void Executor::StartAgent() {
       py::args args = py::make_tuple(py::cast(payload));
       asyncio_loop_.ScheduleFunction(std::move(holder->lock), callback, args);
     };
-    message_processor_.RegisterCallback(channel_id, std::move(callback_wrapper));
+    message_processor_.RegisterPyCallback(channel_id, std::move(callback_wrapper));
   };
   PluginInitializeStatus status = agent->Initialize(agent_interface);
-  if (status == PluginInitializeStatus::kSuccess)
-    spdlog::info("Agent {} initialized", kAgentName);
+  if (status != PluginInitializeStatus::kSuccess) return;
+  spdlog::info("Plugin {} initialized", kAgentName);
 
   int64_t generic_id = message_processor_.GetNewChannelId();
   chat_send_id_ = -1;
   int64_t chat_receive_id = message_processor_.GetNewChannelId();
 
-  message_processor_.RegisterCallback(chat_receive_id, [](Payload payload) -> void {
-    std::string& s = *std::static_pointer_cast<std::string>(payload.data);
-  });
+  message_processor_.RegisterCallback(
+      chat_receive_id,
+      [](Payload payload) -> void {
+        std::string& s = *std::static_pointer_cast<std::string>(payload.data);
+      });
   std::string chat_out_json = ToJson({{"name", "chat_out"}});
   message_processor_.EnqueueMessage(InvokeCommand{chat_receive_id, std::string(kAgentName), chat_out_json, nullptr});
 
-  message_processor_.RegisterCallback(generic_id, [this](Payload payload) -> void {
-    chat_send_id_ = *std::static_pointer_cast<int64_t>(payload.data);
-  });
+  message_processor_.RegisterCallback(
+      generic_id,
+      [this](Payload payload) -> void {
+        chat_send_id_ = *std::static_pointer_cast<int64_t>(payload.data);
+      });
   std::string chat_in_json = ToJson({{"name", "chat_in"}});
   message_processor_.EnqueueMessage(InvokeCommand{generic_id, std::string(kAgentName), chat_in_json});
 }

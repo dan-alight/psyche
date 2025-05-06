@@ -80,18 +80,15 @@ void CppPrint(const std::string& msg) {
 }
 
 template <typename T>
-auto ConvertSharedVoidPtr(py::capsule cap) {
+T ConvertSharedVoidPtr(py::capsule cap) {
   auto* shared_void_ptr = reinterpret_cast<std::shared_ptr<void>*>(cap.get_pointer());
   if (!shared_void_ptr || !(*shared_void_ptr)) {
     if constexpr (std::is_pointer_v<T>) {
       return static_cast<T>(nullptr);
-    } else {
-      throw std::runtime_error("Null pointer in shared_void_ptr");  // Or return a default value
     }
   }
 
   if constexpr (std::is_pointer_v<T>) {
-    using ValueType = typename std::remove_pointer_t<T>;
     return static_cast<T>(shared_void_ptr->get());
   } else {
     return *static_cast<T*>(shared_void_ptr->get());
@@ -125,6 +122,14 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
 
   py::class_<InvokeCommand>(m, "InvokeCommand")
       .def(py::init<>())
+      .def(
+          py::init([](int64_t sender_channel_id, std::string to, std::string data, std::shared_ptr<void> aux) {
+            return InvokeCommand{sender_channel_id, to, data, aux};
+          }),
+          py::arg("sender_channel_id") = -1,
+          py::arg("to") = "",
+          py::arg("data") = "",
+          py::arg("aux") = nullptr)
       .def_readwrite("sender_channel_id", &InvokeCommand::sender_channel_id)
       .def_readwrite("to", &InvokeCommand::to)
       .def_readwrite("data", &InvokeCommand::data)
@@ -205,9 +210,9 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
           py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset, uint32_t flags) {
             return Payload{receiver_channel_id, data, size, offset, flags};
           }),
-          py::arg("receiver_channel_id"),
-          py::arg("data"),
-          py::arg("size"),
+          py::arg("receiver_channel_id") = -1,
+          py::arg("data") = nullptr,
+          py::arg("size") = 0,
           py::arg("offset") = 0,
           py::arg("flags") = 0)
       .def_readwrite("receiver_channel_id", &Payload::receiver_channel_id)
@@ -236,8 +241,9 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def("invoke", [](AgentInterface& a, const InvokeCommand& ic) {
         a.invoke(ic);
       })
-      .def("invoke_with_callback", [](AgentInterface& a, const InvokeCommand& ic, const std::function<void(Payload)>& cb) {
-        a.invoke_with_callback(ic, cb);
+      .def("invoke_with_callback", [](AgentInterface& a, const InvokeCommand& ic, py::object cb) {
+        a.internal.py_register_callback(ic.sender_channel_id, cb);
+        a.invoke(ic);
       })
       .def("register_callback", [](AgentInterface& a, int64_t channel_id, py::object cb) {
         a.internal.py_register_callback(channel_id, cb);

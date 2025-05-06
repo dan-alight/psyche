@@ -24,7 +24,7 @@ namespace internal {
 std::string SerializeJsonObject(const std::unordered_map<std::string, JsonValue>& obj);
 std::string SerializeJsonValue(const JsonValue& value);
 
-std::string EscapeJsonString(const std::string& input) {
+inline std::string EscapeJsonString(const std::string& input) {
   std::ostringstream ss;
   for (auto ch : input) {
     switch (ch) {
@@ -61,7 +61,7 @@ std::string EscapeJsonString(const std::string& input) {
   return ss.str();
 }
 
-std::string SerializeJsonValue(const JsonValue& value) {
+inline std::string SerializeJsonValue(const JsonValue& value) {
   auto visitor = [](auto&& v) -> std::string {
     using T = std::decay_t<decltype(v)>;
 
@@ -105,7 +105,7 @@ std::string SerializeJsonValue(const JsonValue& value) {
   return rva::visit(visitor, value);
 }
 
-std::string SerializeJsonObject(const std::unordered_map<std::string, JsonValue>& obj) {
+inline std::string SerializeJsonObject(const std::unordered_map<std::string, JsonValue>& obj) {
   std::string result = "{";
   size_t i = 0;
 
@@ -124,7 +124,7 @@ std::string SerializeJsonObject(const std::unordered_map<std::string, JsonValue>
 
 }  // namespace internal
 
-std::string ToJson(const std::unordered_map<std::string, JsonValue>& obj) {
+inline std::string ToJson(const std::unordered_map<std::string, JsonValue>& obj) {
   return internal::SerializeJsonObject(obj);
 }
 

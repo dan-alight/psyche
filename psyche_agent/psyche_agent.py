@@ -1,8 +1,10 @@
-from pyplugin import Agent, PluginInitializeStatus, log, to_string
+from pyplugin import Agent, InvokeCommand, PluginInitializeStatus, log, to_string
 import json
 import asyncio
 from psyche_agent.invokable import get_invokable
 from psyche_agent.db import get_connection, close_connection
+from functools import partial
+from psyche_agent.callback import receive_resource_info
 import inspect
 
 class PsycheAgent(Agent):
@@ -25,7 +27,7 @@ class PsycheAgent(Agent):
       return
     # Build available arguments
     available_args = {
-        "self": self,        
+        "self": self,
         "channel_id": channel_id,
         "command": command,
         "aux": aux,
@@ -47,10 +49,17 @@ class PsycheAgent(Agent):
     self.interface = agent_interface
     self.receiving_channels = []
     self._compute_interrupt_events = {}    # channel_id -> asyncio.Event
-    
-    # Initialize database connection
+
     await get_connection()
-    
+
+    resource_return_id = self.interface.get_new_channel_id()
+    data = {
+        "name": "get_resource_info",
+    }
+    ic = InvokeCommand(resource_return_id, "host", json.dumps(data))
+    callback = partial(receive_resource_info, self)
+    self.interface.invoke_with_callback(ic, callback)
+
     return PluginInitializeStatus.SUCCESS
 
   def plugin_added(self, plugin_info):

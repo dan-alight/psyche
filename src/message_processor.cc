@@ -68,19 +68,35 @@ void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
 }
 
 void MessageProcessor::ProcessPayload(const Payload& payload) {
-  auto search = registered_callbacks_.find(payload.receiver_channel_id);
-  if (search == registered_callbacks_.end()) return;
-  if (payload.flags & PayloadFlags::kFinal) {
-    auto cb = search->second;
-    registered_callbacks_.erase(payload.receiver_channel_id);
-    cb(payload);
-  } else {
-    auto& cb = search->second;
-    try {
-      cb(payload);
-    } catch (const py::error_already_set& e) {
-      std::cerr << "Error in callback: " << e.what() << std::endl;
+  std::shared_ptr<std::function<void(Payload)>> func;
+  bool is_python = false;
+
+  {
+    std::shared_lock lock(registered_callbacks_mutex_);
+
+    auto search = registered_callbacks_.find(payload.receiver_channel_id);
+    if (search == registered_callbacks_.end()) {
+      return;
     }
+
+    func = search->second.func;
+    is_python = search->second.is_python;
+  }
+
+  if (payload.flags & PayloadFlags::kFinal) {
+    std::unique_lock unique_lock(registered_callbacks_mutex_);
+    registered_callbacks_.erase(payload.receiver_channel_id);
+  }
+
+  if (!is_python) {
+    (*func)(payload);
+    return;
+  }
+
+  py::gil_scoped_acquire gil;
+  {
+    auto func_local = std::move(func);
+    (*func_local)(payload);
   }
 }
 
@@ -89,11 +105,14 @@ int64_t MessageProcessor::GetNewChannelId() {
 }
 
 void MessageProcessor::RegisterCallback(int64_t channel_id, std::function<void(Payload)> callback) {
-  registered_callbacks_[channel_id] = callback;
+  std::unique_lock lock(registered_callbacks_mutex_);
+  registered_callbacks_[channel_id] =
+      Callback{std::make_shared<std::function<void(Payload)>>(callback), false};
 }
 
-void MessageProcessor::RemoveCallback(int64_t channel_id) {
-  registered_callbacks_.erase(channel_id);
+void MessageProcessor::RegisterPyCallback(int64_t channel_id, std::function<void(Payload)> callback) {
+  std::unique_lock lock(registered_callbacks_mutex_);
+  registered_callbacks_[channel_id] =
+      Callback{std::make_shared<std::function<void(Payload)>>(callback), true};
 }
-
 }  // namespace psyche
