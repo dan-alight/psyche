@@ -20,7 +20,7 @@ class DefaultAgent : public Agent {
   std::string GetPluginInfo();
   PluginInitializeStatus Initialize(AgentInterface agent_interface);
   void Uninitialize();
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux);
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux);
   void StopStream(int64_t channel_id);
   void PluginAdded(std::string plugin_info);
   void PluginRemoved(std::string name);

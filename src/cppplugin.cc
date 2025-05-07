@@ -11,7 +11,7 @@ std::string CppAgent::GetPluginInfo() {
 void CppAgent::Uninitialize() {
   agent_->Uninitialize();
 }
-void CppAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) {
+void CppAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) {
   agent_->Invoke(channel_id, std::move(data), aux);
 }
 void CppAgent::StopStream(int64_t channel_id) {

@@ -32,8 +32,9 @@ class Plugin {
   // perform some computation and provide some data to an agent channel
   // OR perform some computation without providing data to a channel
   // all data should follow a precise format defined by the plugin info
-  virtual void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) = 0;
+  virtual void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) = 0;
   virtual void StopStream(int64_t channel_id) = 0;
+
 };
 }  // namespace psyche
 #endif  // PSYCHE_PLUGIN_H_

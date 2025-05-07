@@ -15,7 +15,7 @@ class CppAgent : public Agent {
   CppAgent(std::unique_ptr<Agent> agent);
   std::string GetPluginInfo() override;
   void Uninitialize() override;
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) override;
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override;
   void StopStream(int64_t channel_id) override;
   PluginInitializeStatus Initialize(AgentInterface agent_interface) override;
   void PluginAdded(std::string plugin_info) override;

@@ -31,13 +31,13 @@ void PyAgent::Uninitialize() {
   asyncio_loop_->RunSync(override);
 }
 
-void PyAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) {
+void PyAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) {
 }
 
 void PyAgent::Invoke(
     int64_t channel_id,
     std::string data,
-    std::shared_ptr<void> aux,
+    std::shared_ptr<std::any> aux,
     std::shared_lock<std::shared_mutex> lock) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "invoke");
@@ -80,27 +80,41 @@ void CppPrint(const std::string& msg) {
 }
 
 template <typename T>
-T ConvertSharedVoidPtr(py::capsule cap) {
-  auto* shared_void_ptr = reinterpret_cast<std::shared_ptr<void>*>(cap.get_pointer());
-  if (!shared_void_ptr || !(*shared_void_ptr)) {
+T ConvertSharedAnyPtr(py::capsule cap) {
+  auto* shared_any_ptr = reinterpret_cast<std::shared_ptr<std::any>*>(cap.get_pointer());
+  if (!shared_any_ptr || !(*shared_any_ptr)) {
     if constexpr (std::is_pointer_v<T>) {
       return static_cast<T>(nullptr);
     }
+    throw std::runtime_error("Invalid or empty std::any pointer");
   }
 
-  if constexpr (std::is_pointer_v<T>) {
-    return static_cast<T>(shared_void_ptr->get());
-  } else {
-    return *static_cast<T*>(shared_void_ptr->get());
+  try {
+    if constexpr (std::is_pointer_v<T>) {
+      // For pointer types, this needs special handling
+      // This assumes the std::any contains a pointer of type T
+      auto& any_ref = **shared_any_ptr;
+      if (any_ref.type() == typeid(T)) {
+        return std::any_cast<T>(any_ref);
+      } else {
+        throw std::runtime_error("Type mismatch in std::any");
+      }
+    } else {
+      // For value types, we can directly try to cast
+      return std::any_cast<T>(**shared_any_ptr);
+    }
+  } catch (const std::bad_any_cast& e) {
+    throw std::runtime_error(std::string("Type conversion error: ") + e.what());
   }
 }
+
 }  // namespace psyche
 
 using psyche::Agent;
 using psyche::AgentInterface;
 using psyche::Alert;
 using psyche::AsyncioLoop;
-using psyche::ConvertSharedVoidPtr;
+using psyche::ConvertSharedAnyPtr;
 using psyche::CppPrint;
 using psyche::InvokeCommand;
 using psyche::Payload;
@@ -123,7 +137,7 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
   py::class_<InvokeCommand>(m, "InvokeCommand")
       .def(py::init<>())
       .def(
-          py::init([](int64_t sender_channel_id, std::string to, std::string data, std::shared_ptr<void> aux) {
+          py::init([](int64_t sender_channel_id, std::string to, std::string data, std::shared_ptr<std::any> aux) {
             return InvokeCommand{sender_channel_id, to, data, aux};
           }),
           py::arg("sender_channel_id") = -1,
@@ -207,7 +221,7 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
   py::class_<Payload>(m, "Payload")
       .def(py::init<>())
       .def(
-          py::init([](int64_t receiver_channel_id, std::shared_ptr<void> data, size_t size, size_t offset, uint32_t flags) {
+          py::init([](int64_t receiver_channel_id, std::shared_ptr<std::any> data, size_t size, size_t offset, uint32_t flags) {
             return Payload{receiver_channel_id, data, size, offset, flags};
           }),
           py::arg("receiver_channel_id") = -1,
@@ -262,8 +276,8 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def(py::init<>());
 
   m.def("log", &CppPrint);
-  m.def("to_int", &ConvertSharedVoidPtr<int>);
-  m.def("to_string", &ConvertSharedVoidPtr<std::string>);
+  m.def("to_int", &ConvertSharedAnyPtr<int>);
+  m.def("to_string", &ConvertSharedAnyPtr<std::string>);
 
   py::list all_items;
   all_items.append(py::str("PluginInitializeStatus"));

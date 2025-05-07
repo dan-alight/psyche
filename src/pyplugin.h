@@ -1,6 +1,7 @@
 #ifndef PSYCHE_PYPLUGIN_H_
 #define PSYCHE_PYPLUGIN_H_
 
+#include <any>
 #include <iostream>
 #include <shared_mutex>
 #include <string>
@@ -17,9 +18,9 @@ namespace pybind11::detail {
 namespace py = pybind11;
 
 template <>
-struct type_caster<std::shared_ptr<void>> {
+struct type_caster<std::shared_ptr<std::any>> {
  public:
-  PYBIND11_TYPE_CASTER(std::shared_ptr<void>, _("shared_ptr<void>"));
+  PYBIND11_TYPE_CASTER(std::shared_ptr<std::any>, _("shared_ptr<std::any>"));
 
   // Convert from Python to C++
   bool load(handle src, bool) {
@@ -29,14 +30,14 @@ struct type_caster<std::shared_ptr<void>> {
     }
 
     if (py::isinstance<py::str>(src)) {
-      auto ptr = std::make_shared<std::string>(src.cast<std::string>());
-      value = std::shared_ptr<void>(ptr);
+      auto ptr = std::make_shared<std::any>(src.cast<std::string>());
+      value = ptr;
       return true;
     }
 
     if (py::isinstance<py::int_>(src)) {
-      auto ptr = std::make_shared<int64_t>(src.cast<int64_t>());
-      value = std::shared_ptr<void>(ptr);
+      auto ptr = std::make_shared<std::any>(src.cast<int64_t>());
+      value = ptr;
       return true;
     }
 
@@ -44,14 +45,14 @@ struct type_caster<std::shared_ptr<void>> {
   }
 
   // Convert from C++ to Python
-  static handle cast(std::shared_ptr<void> src, return_value_policy policy, handle parent) {
+  static handle cast(std::shared_ptr<std::any> src, return_value_policy policy, handle parent) {
     if (src == nullptr) return none().release();
-    auto* shared_copy = new std::shared_ptr<void>(src);
+    auto* shared_copy = new std::shared_ptr<std::any>(src);
     auto deleter = [](PyObject* cap) {
-      auto* ptr = static_cast<std::shared_ptr<void>*>(PyCapsule_GetPointer(cap, "shared_void_ptr"));
+      auto* ptr = static_cast<std::shared_ptr<std::any>*>(PyCapsule_GetPointer(cap, "shared_any_ptr"));
       delete ptr;
     };
-    return py::capsule(shared_copy, "shared_void_ptr", deleter).release();
+    return py::capsule(shared_copy, "shared_any_ptr", deleter).release();
   }
 };
 }  // namespace pybind11::detail
@@ -63,11 +64,11 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
   std::string GetPluginInfo() override;
   void Uninitialize() override;
 
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) override;
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override;
   void Invoke(
       int64_t channel_id,
       std::string data,
-      std::shared_ptr<void> aux,
+      std::shared_ptr<std::any> aux,
       std::shared_lock<std::shared_mutex> lock);
 
   void StopStream(int64_t channel_id) override;
@@ -94,7 +95,7 @@ class PyPlugin : public Plugin, public py::trampoline_self_life_support {
   void Uninitialize() override {
     PYBIND11_OVERRIDE_PURE(void, Plugin, uninitialize);
   }
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) override {
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override {
     PYBIND11_OVERRIDE_PURE(void, Plugin, invoke, channel_id, data, aux);
   }
   void StopStream(int64_t channel_id) override {
@@ -116,7 +117,7 @@ class PyResource : public Resource, public py::trampoline_self_life_support {
   void Uninitialize() override {
     PYBIND11_OVERRIDE_PURE(void, Resource, uninitialize);
   }
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) override {
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override {
     PYBIND11_OVERRIDE_PURE(void, Resource, invoke, channel_id, data, aux);
   }
   void StopStream(int64_t channel_id) override {

@@ -26,7 +26,7 @@ PluginInitializeStatus DefaultAgent::Initialize(AgentInterface agent_interface) 
 void DefaultAgent::Uninitialize() {
 }
 
-void DefaultAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux) {
+void DefaultAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) {
   rapidjson::Document doc;
   doc.Parse(data.c_str());
   const char* name = doc["name"].GetString();
@@ -37,7 +37,7 @@ void DefaultAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<
     interface_.register_callback(new_channel_id, [this](Payload payload) {
       ReceiveChatInput(payload);
     });
-    interface_.send_payload({channel_id, std::make_shared<int64_t>(new_channel_id), sizeof(int64_t), 0});
+    interface_.send_payload({channel_id, std::make_shared<std::any>(new_channel_id), sizeof(int64_t), 0});
   }
 }
 

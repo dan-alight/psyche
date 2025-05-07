@@ -1,6 +1,7 @@
 #ifndef PSYCHE_HOST_INTERFACE_H_
 #define PSYCHE_HOST_INTERFACE_H_
 
+#include <any>
 #include <functional>
 #include <memory>
 #include <string>
@@ -17,7 +18,7 @@ struct InvokeCommand {
   int64_t sender_channel_id;
   std::string to;
   std::string data;
-  std::shared_ptr<void> aux = nullptr;
+  std::shared_ptr<std::any> aux = nullptr;
 };
 
 struct StopStreamCommand {
@@ -41,7 +42,7 @@ struct EnableBitwiseOperators<PayloadFlags> {
 
 struct Payload {
   int64_t receiver_channel_id;
-  std::shared_ptr<void> data;
+  std::shared_ptr<std::any> data;
   size_t size;
   size_t offset = 0;
   uint32_t flags = 0;
@@ -65,11 +66,7 @@ struct AgentInterface : public PluginInterface {
   std::function<void(InvokeCommand)> invoke;
   std::function<void(InvokeCommand, std::function<void(Payload)>)> invoke_with_callback;
   std::function<void(int64_t, std::function<void(Payload)>)> register_callback;
-  // Can check all messages against legit streams, so no need to worry about timing on this
-  // (i.e agent removes channel_id from list of legit streams and then ignores any further)
   std::function<void(StopStreamCommand)> stop_stream;
-  // much more reasonable to extend the AgentInterface/PluginInterface than the class APIs
-  // could have a function for engine commands
 
   struct Internal {
     std::function<void(int64_t, py::object)> py_register_callback;

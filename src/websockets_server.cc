@@ -111,7 +111,7 @@ void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::O
     message_processor_.RegisterCallback(channel_id, [this, ws, ws_id](Payload payload) {
       constexpr size_t header_size = sizeof(char) + sizeof(int64_t) + sizeof(size_t) + sizeof(size_t) + sizeof(int32_t);
       std::vector<char> response(header_size + payload.size);
-      char* data_ptr = static_cast<char*>(payload.data.get()) + payload.offset;
+      char* data_ptr = std::any_cast<char>(payload.data.get()) + payload.offset;
       response[0] = static_cast<char>(ResponseId::kPayload);
       memcpy(response.data() + sizeof(char), &payload.receiver_channel_id, sizeof(int64_t));
       memcpy(response.data() + sizeof(char) + sizeof(int64_t), &payload.size, sizeof(size_t));

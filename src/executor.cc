@@ -69,7 +69,8 @@ void Executor::Start() {
       auto data = make_shared_type_erased(command);
       message_processor_.EnqueueMessage(Payload{chat_send_id_, data, command.length()}); */
       std::string cout_json = ToJson({{"name", "cout"}});
-      auto data = make_shared_type_erased(command);
+      //auto data = make_shared_type_erased(command);
+      auto data = std::make_shared<std::any>(command);
       message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data});
     }
   }
@@ -136,7 +137,7 @@ void Executor::StartAgent() {
   message_processor_.RegisterCallback(
       chat_receive_id,
       [](Payload payload) -> void {
-        std::string& s = *std::static_pointer_cast<std::string>(payload.data);
+        auto s = std::any_cast<std::string>(*payload.data);
       });
   std::string chat_out_json = ToJson({{"name", "chat_out"}});
   message_processor_.EnqueueMessage(InvokeCommand{chat_receive_id, std::string(kAgentName), chat_out_json, nullptr});
@@ -144,7 +145,7 @@ void Executor::StartAgent() {
   message_processor_.RegisterCallback(
       generic_id,
       [this](Payload payload) -> void {
-        chat_send_id_ = *std::static_pointer_cast<int64_t>(payload.data);
+        chat_send_id_ = std::any_cast<int64_t>(*payload.data);
       });
   std::string chat_in_json = ToJson({{"name", "chat_in"}});
   message_processor_.EnqueueMessage(InvokeCommand{generic_id, std::string(kAgentName), chat_in_json});
