@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <thread>
+#include <cstring>
 
 #include "host_interface.h"
 #include "libusockets.h"
@@ -109,15 +110,17 @@ void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::O
     auto* user_data = ws->getUserData();
     int ws_id = user_data->id;
     message_processor_.RegisterCallback(channel_id, [this, ws, ws_id](Payload payload) {
-      constexpr size_t header_size = sizeof(char) + sizeof(int64_t) + sizeof(size_t) + sizeof(size_t) + sizeof(int32_t);
-      std::vector<char> response(header_size + payload.size);
-      char* data_ptr = std::any_cast<char>(payload.data.get()) + payload.offset;
+      constexpr size_t header_size = sizeof(char) + sizeof(int64_t) + sizeof(uint32_t);
+      
+      // Right now we're just assuming the data is a null-terminated char array.
+      // Later we can support something like struct S { char* data; size_t size; size_t offset; };
+      char* data_ptr = std::any_cast<char>(payload.data.get());
+      size_t payload_size = std::strlen(data_ptr);
+      std::vector<char> response(header_size + payload_size);
       response[0] = static_cast<char>(ResponseId::kPayload);
       memcpy(response.data() + sizeof(char), &payload.receiver_channel_id, sizeof(int64_t));
-      memcpy(response.data() + sizeof(char) + sizeof(int64_t), &payload.size, sizeof(size_t));
-      memcpy(response.data() + sizeof(char) + sizeof(int64_t) + sizeof(size_t), &payload.offset, sizeof(size_t));
-      memcpy(response.data() + sizeof(char) + sizeof(int64_t) + sizeof(size_t) + sizeof(size_t), &payload.flags, sizeof(int32_t));
-      memcpy(response.data() + header_size, data_ptr, payload.size);
+      memcpy(response.data() + sizeof(char) + sizeof(int64_t), &payload.flags, sizeof(uint32_t));
+      memcpy(response.data() + header_size, data_ptr, payload_size);
 
       loop_->defer([this, ws, ws_id, msg = std::move(response)]() {
         if (!open_websockets_.contains(ws_id)) return;

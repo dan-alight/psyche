@@ -14,7 +14,6 @@ namespace psyche {
 namespace py = pybind11;
 
 struct InvokeCommand {
-  // could be -1 if no response is wanted/expected
   int64_t sender_channel_id;
   std::string to;
   std::string data;
@@ -43,18 +42,12 @@ struct EnableBitwiseOperators<PayloadFlags> {
 struct Payload {
   int64_t receiver_channel_id;
   std::shared_ptr<std::any> data;
-  size_t size;
-  size_t offset = 0;
   uint32_t flags = 0;
 };
-
-using Alert = std::string;
 
 struct PluginInterface {
   std::function<std::string()> get_host_info;
   std::function<void(Payload)> send_payload;
-  // Can be used to indicate problems
-  std::function<void(Alert)> send_alert;
   // functions for network access
   // functions for registering regular (e.g every 1000ms or 5000ms, etc) callbacks
 };

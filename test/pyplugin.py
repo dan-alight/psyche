@@ -10,11 +10,9 @@ class PayloadFlags:
   ERROR = 1 << 1
 
 class Payload:
-  def __init__(self, id=-1, data=None, size=0, offset=0, flags=0):
+  def __init__(self, id=-1, data=None, flags=0):
     self.id = id
     self.data = data
-    self.size = size
-    self.offset = offset
     self.flags = flags
 
 class PluginInitializeStatus:

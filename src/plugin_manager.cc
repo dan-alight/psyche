@@ -163,7 +163,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
       std::string marker_file = venv_path + "/.deps_installed";
       if (!std::filesystem::exists(marker_file) ||
           std::filesystem::last_write_time(requirements_file) > std::filesystem::last_write_time(marker_file)) {
-        std::ofstream(marker_file).put('🐻');
+        std::ofstream(marker_file).put('1');
 
 #if defined(_WIN32)
         std::string command = venv_path + "/Scripts/pip install -r " + requirements_file + " -v";

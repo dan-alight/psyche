@@ -112,7 +112,6 @@ T ConvertSharedAnyPtr(py::capsule cap) {
 
 using psyche::Agent;
 using psyche::AgentInterface;
-using psyche::Alert;
 using psyche::AsyncioLoop;
 using psyche::ConvertSharedAnyPtr;
 using psyche::CppPrint;
@@ -221,18 +220,14 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
   py::class_<Payload>(m, "Payload")
       .def(py::init<>())
       .def(
-          py::init([](int64_t receiver_channel_id, std::shared_ptr<std::any> data, size_t size, size_t offset, uint32_t flags) {
-            return Payload{receiver_channel_id, data, size, offset, flags};
+          py::init([](int64_t receiver_channel_id, std::shared_ptr<std::any> data, uint32_t flags) {
+            return Payload{receiver_channel_id, data, flags};
           }),
           py::arg("receiver_channel_id") = -1,
           py::arg("data") = nullptr,
-          py::arg("size") = 0,
-          py::arg("offset") = 0,
           py::arg("flags") = 0)
       .def_readwrite("receiver_channel_id", &Payload::receiver_channel_id)
       .def_readwrite("data", &Payload::data)
-      .def_readwrite("size", &Payload::size)
-      .def_readwrite("offset", &Payload::offset)
       .def_readwrite("flags", &Payload::flags);
 
   py::class_<PluginInterface>(m, "PluginInterface")
@@ -242,9 +237,6 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       })
       .def("send_payload", [](PluginInterface& p, const Payload& payload) {
         p.send_payload(payload);
-      })
-      .def("send_alert", [](PluginInterface& p, const Alert& alert) {
-        p.send_alert(alert);
       });
 
   py::class_<AgentInterface, PluginInterface>(m, "AgentInterface")

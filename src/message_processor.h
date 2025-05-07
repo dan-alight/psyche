@@ -23,8 +23,7 @@ class MessageProcessor {
     requires(
         std::same_as<std::remove_reference_t<T>, InvokeCommand> ||
         std::same_as<std::remove_reference_t<T>, StopStreamCommand> ||
-        std::same_as<std::remove_reference_t<T>, Payload> ||
-        std::same_as<std::remove_reference_t<T>, Alert>)
+        std::same_as<std::remove_reference_t<T>, Payload>)
   {
     message_queue_.enqueue(std::move(message));
   }
@@ -38,7 +37,6 @@ class MessageProcessor {
       InvokeCommand,
       StopStreamCommand,
       Payload,
-      Alert,
       ExitLoop>;
   struct Callback {
     std::shared_ptr<std::function<void(Payload)>> func;

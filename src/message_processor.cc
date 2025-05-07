@@ -36,7 +36,6 @@ void MessageProcessor::Run() {
     } else if constexpr (std::is_same_v<T, StopStreamCommand>) {
     } else if constexpr (std::is_same_v<T, Payload>) {
       ProcessPayload(arg);
-    } else if constexpr (std::is_same_v<T, Alert>) {
     } else if constexpr (std::is_same_v<T, ExitLoop>) {
       running_ = false;
     }

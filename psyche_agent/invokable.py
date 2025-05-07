@@ -50,7 +50,7 @@ def chat_in(self, channel_id):
   callback = partial(receive_chat_input, self)
   self.interface.register_callback(new_channel_id, callback)
   flags = PayloadFlags.FINAL
-  self.interface.send_payload(Payload(channel_id, new_channel_id, 8, 0, flags))
+  self.interface.send_payload(Payload(channel_id, new_channel_id, flags))
 
 @invokable
 def set_openai_api_key(self, command):

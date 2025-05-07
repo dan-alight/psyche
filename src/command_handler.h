@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <any>
 
 #include "data_store.h"
 #include "rapidjson/document.h"
@@ -20,12 +21,12 @@ class CommandHandler {
  public:
   CommandHandler(DataStore& data_store);
   void SetMessageProcessor(MessageProcessor* message_processor);
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<void> aux);
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux);
   void StopStream(int64_t channel_id);
 
  private:
-  void AddApiKey(int64_t channel_id, rapidjson::Document& doc, std::shared_ptr<void> aux);
-  void GetResourceInfo(int64_t channel_id, rapidjson::Document& doc, std::shared_ptr<void> aux);
+  void AddApiKey(rapidjson::Document& doc);
+  void GetResourceInfo(int64_t channel_id, rapidjson::Document& doc);
 
   DataStore& data_store_;
   MessageProcessor* message_processor_;
