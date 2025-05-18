@@ -79,12 +79,17 @@ void AsyncioLoop::ScheduleFunction(
   py::module_ asyncio = py::module_::import("asyncio");
   auto lock_ptr = std::make_shared<std::shared_lock<std::shared_mutex>>(std::move(lock));
   if (IsCoroutine(func)) {
+    // Will need to try-catch so the lock can be released if the coroutine fails
     py::object future = asyncio.attr("run_coroutine_threadsafe")(func(*safe_args, **safe_kwargs), loop_);
     auto py_done_callback = py::cpp_function([lock_ptr](py::object) {});
     future.attr("add_done_callback")(py_done_callback);
   } else {
     auto wrapper = [func, safe_args, safe_kwargs, lock_ptr]() {
-      func(*safe_args, **safe_kwargs);
+      try {
+        func(*safe_args, **safe_kwargs);
+      } catch (const py::error_already_set& e) {
+        spdlog::error("Error in ScheduleFunction: {}", e.what());
+      }
     };
     loop_.attr("call_soon_threadsafe")(py::cpp_function(wrapper));
   }

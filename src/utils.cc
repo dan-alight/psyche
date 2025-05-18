@@ -7,6 +7,8 @@
 #include <unistd.h>
 #endif
 
+#include <fstream>
+#include <sstream>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -16,6 +18,8 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include "spdlog/spdlog.h"
 
 namespace psyche {
 std::string GetExecutableDir() {
@@ -52,5 +56,16 @@ std::string SnakeToPascal(const std::string& snake) {
   }
 
   return pascal_case;
+}
+
+std::string ReadFile(const std::string& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    spdlog::error("Failed to open file: {}", path);
+    return "";
+  }
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
 }
 }  // namespace psyche

@@ -26,7 +26,7 @@ class CommandHandler {
 
  private:
   void AddApiKey(rapidjson::Document& doc);
-  void GetResourceInfo(int64_t channel_id, rapidjson::Document& doc);
+  void GetResourceInfo(int64_t channel_id);
 
   DataStore& data_store_;
   MessageProcessor* message_processor_;

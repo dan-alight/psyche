@@ -11,5 +11,8 @@ def receive_chat_input(self, payload):
 def receive_resource_info(self, payload):
   s = to_string(payload.data)
   j = json.loads(s)
-  
-  log(s)
+  self.resource_info = j
+  api_keys = j['api_keys']
+  #log(str(self.asdf))
+  for key in api_keys:
+    log(key)

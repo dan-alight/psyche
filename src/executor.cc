@@ -65,13 +65,9 @@ void Executor::Start() {
       StopAgent();
       StartAgent();
     } else {
-      /* if (chat_send_id_ == -1) continue;
-      auto data = make_shared_type_erased(command);
-      message_processor_.EnqueueMessage(Payload{chat_send_id_, data, command.length()}); */
-      std::string cout_json = ToJson({{"name", "cout"}});
-      //auto data = make_shared_type_erased(command);
+      /* std::string cout_json = ToJson({{"name", "cout"}});
       auto data = std::make_shared<std::any>(command);
-      message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data});
+      message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data}); */
     }
   }
 
@@ -99,9 +95,6 @@ void Executor::StartAgent() {
   Agent* agent = static_cast<Agent*>((*holder).plugin);
 
   AgentInterface agent_interface;
-  agent_interface.get_host_info = []() -> std::string {
-    return "Psyche";
-  };
   agent_interface.invoke_with_callback =
       [this](InvokeCommand command, std::function<void(Payload)> callback) -> void {
     message_processor_.RegisterCallback(command.sender_channel_id, std::move(callback));
@@ -124,10 +117,15 @@ void Executor::StartAgent() {
       py::args args = py::make_tuple(py::cast(payload));
       asyncio_loop_.ScheduleFunction(std::move(holder->lock), callback, args);
     };
-    message_processor_.RegisterPyCallback(channel_id, std::move(callback_wrapper));
+    message_processor_.RegisterPyCallback(
+        channel_id, std::move(callback_wrapper));
   };
-  PluginInitializeStatus status = agent->Initialize(agent_interface);
-  if (status != PluginInitializeStatus::kSuccess) return;
+  try {
+    agent->Initialize(agent_interface);
+  } catch (const std::exception& e) {
+    spdlog::error("Failed to initialize agent: {}", e.what());
+    return;
+  }
   spdlog::info("Plugin {} initialized", kAgentName);
 
   int64_t generic_id = message_processor_.GetNewChannelId();

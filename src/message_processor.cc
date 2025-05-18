@@ -53,6 +53,9 @@ void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
   }
 
   std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(command.to);
+  // Could be that the plugin is unloading; could be that it doesn't exist.
+  // Could even be that the loaded plugins mutex is unavailable.
+  // Will have to deal with this somehow.
   if (!holder.has_value()) {
     spdlog::warn("Could not process InvokeCommand. Plugin {} not available", command.to);
     return;

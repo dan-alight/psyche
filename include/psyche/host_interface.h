@@ -25,11 +25,6 @@ struct StopStreamCommand {
   std::string to;
 };
 
-template <typename T>
-std::shared_ptr<void> make_shared_type_erased(T val) {
-  return std::shared_ptr<void>(std::make_shared<T>(std::move(val)));
-}
-
 enum class PayloadFlags : uint32_t {
   kFinal = 1 << 0,
   kError = 1 << 1,
@@ -46,7 +41,6 @@ struct Payload {
 };
 
 struct PluginInterface {
-  std::function<std::string()> get_host_info;
   std::function<void(Payload)> send_payload;
   // functions for network access
   // functions for registering regular (e.g every 1000ms or 5000ms, etc) callbacks

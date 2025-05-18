@@ -15,15 +15,14 @@
 #include "rapidjson/writer.h"
 
 namespace psyche {
-class DefaultAgent : public Agent {
+class BasicAgent : public Agent {
  public:
-  std::string GetPluginInfo();
-  PluginInitializeStatus Initialize(AgentInterface agent_interface);
-  void Uninitialize();
-  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux);
-  void StopStream(int64_t channel_id);
-  void PluginAdded(std::string plugin_info);
-  void PluginRemoved(std::string name);
+  void Initialize(AgentInterface agent_interface) override;
+  void Uninitialize() override;
+  void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override;
+  void StopStream(int64_t channel_id) override;
+  void PluginAdded(std::string plugin_info) override;
+  void PluginRemoved(std::string name) override;
 
  private:
   AgentInterface interface_;
@@ -31,7 +30,7 @@ class DefaultAgent : public Agent {
 
   void ReceiveChatInput(Payload payload);
 };
-PSYCHE_REGISTER_PLUGIN(DefaultAgent)
+PSYCHE_REGISTER_PLUGIN(BasicAgent)
 }  // namespace psyche
 
 #endif

@@ -61,7 +61,6 @@ namespace psyche {
 class PyAgent : public Agent, public py::trampoline_self_life_support {
  public:
   void SetLoop(AsyncioLoop* asyncio_loop);
-  std::string GetPluginInfo() override;
   void Uninitialize() override;
 
   void Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) override;
@@ -72,7 +71,7 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
       std::shared_lock<std::shared_mutex> lock);
 
   void StopStream(int64_t channel_id) override;
-  PluginInitializeStatus Initialize(AgentInterface agent_interface) override;
+  void Initialize(AgentInterface agent_interface) override;
   void PluginAdded(std::string plugin_info) override;
   void PluginRemoved(std::string name) override;
 
@@ -88,9 +87,6 @@ class PyPlugin : public Plugin, public py::trampoline_self_life_support {
  public:
   void SetLoop(AsyncioLoop* asyncio_loop) {
     asyncio_loop_ = asyncio_loop;
-  }
-  std::string GetPluginInfo() override {
-    PYBIND11_OVERRIDE_PURE(std::string, Plugin, get_plugin_info);
   }
   void Uninitialize() override {
     PYBIND11_OVERRIDE_PURE(void, Plugin, uninitialize);
@@ -111,9 +107,6 @@ class PyResource : public Resource, public py::trampoline_self_life_support {
   void SetLoop(std::shared_ptr<AsyncioLoop> asyncio_loop) {
     asyncio_loop_ = asyncio_loop;
   }
-  std::string GetPluginInfo() override {
-    PYBIND11_OVERRIDE_PURE(std::string, Resource, get_plugin_info);
-  }
   void Uninitialize() override {
     PYBIND11_OVERRIDE_PURE(void, Resource, uninitialize);
   }
@@ -123,8 +116,8 @@ class PyResource : public Resource, public py::trampoline_self_life_support {
   void StopStream(int64_t channel_id) override {
     PYBIND11_OVERRIDE_PURE(void, Resource, stop_stream, channel_id);
   }
-  PluginInitializeStatus Initialize(ResourceInterface resource_interface) override {
-    PYBIND11_OVERRIDE_PURE(PluginInitializeStatus, Resource, initialize, resource_interface);
+  void Initialize(ResourceInterface resource_interface) override {
+    PYBIND11_OVERRIDE_PURE(void, Resource, initialize, resource_interface);
   }
 
  private:

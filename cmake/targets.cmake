@@ -21,6 +21,7 @@ add_executable(Psyche
   src/asyncio_loop.cc
   src/cppplugin.cc
   src/data_store.cc
+  src/command_handler.cc
 )
 
 set_target_properties(Psyche PROPERTIES

@@ -18,12 +18,6 @@ namespace psyche {
 void PyAgent::SetLoop(AsyncioLoop* asyncio_loop) {
   asyncio_loop_ = asyncio_loop;
 }
-std::string PyAgent::GetPluginInfo() {
-  py::gil_scoped_acquire gil;
-  py::function override = py::get_override(this, "get_plugin_info");
-  py::object result = asyncio_loop_->RunSync(override);
-  return result.cast<std::string>();
-}
 
 void PyAgent::Uninitialize() {
   py::gil_scoped_acquire gil;
@@ -41,11 +35,7 @@ void PyAgent::Invoke(
     std::shared_lock<std::shared_mutex> lock) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "invoke");
-  try {
-    asyncio_loop_->ScheduleFunction(std::move(lock), override, py::make_tuple(channel_id, data, aux));
-  } catch (const std::exception& e) {
-    spdlog::error("Error in PyAgent Invoke: {}", e.what());
-  }
+  asyncio_loop_->ScheduleFunction(std::move(lock), override, py::make_tuple(channel_id, data, aux));
 }
 
 void PyAgent::StopStream(int64_t channel_id) {
@@ -54,17 +44,10 @@ void PyAgent::StopStream(int64_t channel_id) {
   /* asyncio_loop_->ScheduleFunction(override, py::make_tuple(channel_id)); */
 }
 
-PluginInitializeStatus PyAgent::Initialize(AgentInterface agent_interface) {
+void PyAgent::Initialize(AgentInterface agent_interface) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "initialize");
-  try {
-    py::object result = asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
-    auto status = result.cast<PluginInitializeStatus>();
-    return status;
-  } catch (const std::exception& e) {
-    spdlog::error("Error in PyAgent Initialize: {}", e.what());
-  }
-  return PluginInitializeStatus::kError;
+  asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
 }
 
 void PyAgent::PluginAdded(std::string plugin_info) {
@@ -119,7 +102,6 @@ using psyche::InvokeCommand;
 using psyche::Payload;
 using psyche::PayloadFlags;
 using psyche::Plugin;
-using psyche::PluginInitializeStatus;
 using psyche::PluginInterface;
 using psyche::PyAgent;
 using psyche::PyPlugin;
@@ -129,10 +111,6 @@ using psyche::StopStreamCommand;
 namespace py = pybind11;
 
 PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
-  py::enum_<PluginInitializeStatus>(m, "PluginInitializeStatus")
-      .value("SUCCESS", PluginInitializeStatus::kSuccess)
-      .value("ERROR", PluginInitializeStatus::kError);
-
   py::class_<InvokeCommand>(m, "InvokeCommand")
       .def(py::init<>())
       .def(
@@ -232,9 +210,6 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
 
   py::class_<PluginInterface>(m, "PluginInterface")
       .def(py::init<>())
-      .def("get_host_info", [](PluginInterface& p) {
-        return p.get_host_info();
-      })
       .def("send_payload", [](PluginInterface& p, const Payload& payload) {
         p.send_payload(payload);
       });

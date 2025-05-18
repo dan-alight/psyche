@@ -15,10 +15,6 @@ class Payload:
     self.data = data
     self.flags = flags
 
-class PluginInitializeStatus:
-  SUCCESS = 0
-  ERROR = 1
-
 class InvokableCommand:
   def __init__(self, id=-1, to="", data="", aux=None):
     self.id = id

@@ -17,7 +17,7 @@ def get_invokable(name):
 async def compute(self, channel_id):
   # Create a new interrupt event for this channel
   event = asyncio.Event()
-  self._compute_interrupt_events[channel_id] = event
+  self.compute_interrupt_events[channel_id] = event
   s = 0
   try:
     for i in range(100000000):
@@ -31,11 +31,11 @@ async def compute(self, channel_id):
       log(f"Compute finished: {s}")
   finally:
     # Clean up event after computation
-    self._compute_interrupt_events.pop(channel_id, None)
+    self.compute_interrupt_events.pop(channel_id, None)
 
 @invokable
 def interrupt(self, channel_id):
-  event = self._compute_interrupt_events.get(channel_id)
+  event = self.compute_interrupt_events.get(channel_id)
   if event:
     event.set()
     log(f"Interrupt signal sent for channel {channel_id}")
@@ -46,18 +46,13 @@ def chat_out(self, channel_id):
 
 @invokable
 def chat_in(self, channel_id):
+  if self.resource_info is None:
+    # queue it up
+    pass
+
+
   new_channel_id = self.interface.get_new_channel_id()
   callback = partial(receive_chat_input, self)
   self.interface.register_callback(new_channel_id, callback)
   flags = PayloadFlags.FINAL
   self.interface.send_payload(Payload(channel_id, new_channel_id, flags))
-
-@invokable
-def set_openai_api_key(self, command):
-  api_key = command.get("api_key")
-  self.client = AsyncOpenAI(api_key=api_key)
-  log(str(self.client))
-
-@invokable
-def cout(aux):
-  log(to_string(aux))

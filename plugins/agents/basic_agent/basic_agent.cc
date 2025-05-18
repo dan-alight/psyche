@@ -14,19 +14,14 @@
 
 namespace psyche {
 
-std::string DefaultAgent::GetPluginInfo() {
-  return "defacto agent";
-}
-
-PluginInitializeStatus DefaultAgent::Initialize(AgentInterface agent_interface) {
+void BasicAgent::Initialize(AgentInterface agent_interface) {
   interface_ = std::move(agent_interface);
-  return PluginInitializeStatus::kSuccess;
 }
 
-void DefaultAgent::Uninitialize() {
+void BasicAgent::Uninitialize() {
 }
 
-void DefaultAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) {
+void BasicAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<std::any> aux) {
   rapidjson::Document doc;
   doc.Parse(data.c_str());
   const char* name = doc["name"].GetString();
@@ -37,11 +32,11 @@ void DefaultAgent::Invoke(int64_t channel_id, std::string data, std::shared_ptr<
     interface_.register_callback(new_channel_id, [this](Payload payload) {
       ReceiveChatInput(payload);
     });
-    interface_.send_payload({channel_id, std::make_shared<std::any>(new_channel_id), sizeof(int64_t), 0});
+    interface_.send_payload({channel_id, std::make_shared<std::any>(new_channel_id), 0});
   }
 }
 
-void DefaultAgent::StopStream(int64_t channel_id) {
+void BasicAgent::StopStream(int64_t channel_id) {
   for (auto it = receiving_channels_.begin(); it != receiving_channels_.end();) {
     if (channel_id == *it) {
       it = receiving_channels_.erase(it);
@@ -51,18 +46,18 @@ void DefaultAgent::StopStream(int64_t channel_id) {
   }
 }
 
-void DefaultAgent::PluginAdded(std::string plugin_info) {
+void BasicAgent::PluginAdded(std::string plugin_info) {
 }
 
-void DefaultAgent::PluginRemoved(std::string name) {
+void BasicAgent::PluginRemoved(std::string name) {
 }
 
-void DefaultAgent::ReceiveChatInput(Payload payload) {
-  std::string& s = *std::static_pointer_cast<std::string>(payload.data);
+void BasicAgent::ReceiveChatInput(Payload payload) {
+  auto& s = std::any_cast<std::string&>(*payload.data);
   // do something with it
   // ...
   for (int64_t channel_id : receiving_channels_) {
-    interface_.send_payload({channel_id, payload.data, payload.size, payload.offset});
+    interface_.send_payload({channel_id, payload.data, 0});
   }
 }
 

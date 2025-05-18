@@ -20,7 +20,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
   std::string info_path = dir + "/info.json";
   std::ifstream file(info_path);
   if (!file.is_open()) {
-    spdlog::warn("Could not open plugin info file: {}", info_path);
+    spdlog::error("Could not open plugin info file: {}", info_path);
     return PluginLoadStatus::kInvalidPlugin;
   }
 
@@ -31,17 +31,17 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
   rapidjson::Document doc;
   doc.Parse(json_str.c_str());
   if (doc.HasParseError()) {
-    spdlog::warn("Failed to parse plugin info.json: error code {}", static_cast<int>(doc.GetParseError()));
+    spdlog::error("Failed to parse plugin info.json: error code {}", static_cast<int>(doc.GetParseError()));
     return PluginLoadStatus::kInvalidPlugin;
   }
 
   if (!doc.IsObject()) {
-    spdlog::warn("Plugin info.json is not a JSON object");
+    spdlog::error("Plugin info.json is not a JSON object");
     return PluginLoadStatus::kInvalidPlugin;
   }
 
   if (!doc.HasMember("name") || !doc["name"].IsString()) {
-    spdlog::warn("Plugin info.json missing 'name' or 'name' is not a string");
+    spdlog::error("Plugin info.json missing 'name' or 'name' is not a string");
     return PluginLoadStatus::kInvalidPlugin;
   }
   const char* name = doc["name"].GetString();
@@ -51,13 +51,13 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
   }
 
   if (!doc.HasMember("language") || !doc["language"].IsString()) {
-    spdlog::warn("Plugin info.json missing 'language' or 'language' is not a string");
+    spdlog::error("Plugin info.json missing 'language' or 'language' is not a string");
     return PluginLoadStatus::kInvalidPlugin;
   }
   const char* language = doc["language"].GetString();
 
   if (!doc.HasMember("type") || !doc["type"].IsString()) {
-    spdlog::warn("Plugin info.json missing 'type' or 'type' is not a string");
+    spdlog::error("Plugin info.json missing 'type' or 'type' is not a string");
     return PluginLoadStatus::kInvalidPlugin;
   }
   const char* type_str = doc["type"].GetString();
@@ -68,7 +68,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
   } else if (std::strcmp(type_str, "resource") == 0) {
     type = PluginType::kResource;
   } else {
-    spdlog::warn("Plugin info.json has invalid 'type': {}", type_str);
+    spdlog::error("Plugin info.json has invalid 'type': {}", type_str);
     return PluginLoadStatus::kInvalidPlugin;
   }
 
@@ -198,7 +198,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
       return PluginLoadStatus::kInvalidPlugin;
     }
   } else {
-    spdlog::warn("Plugin info.json has invalid 'language': {}", language);
+    spdlog::error("Plugin info.json has invalid 'language': {}", language);
     return PluginLoadStatus::kInvalidPlugin;
   }
   return PluginLoadStatus::kSuccess;

@@ -5,6 +5,7 @@
 namespace psyche {
 std::string GetExecutableDir();
 std::string SnakeToPascal(const std::string& snake);
+std::string ReadFile(const std::string& path);
 }
 
 #endif

@@ -8,7 +8,7 @@ namespace psyche {
 class Resource : public Plugin {
  public:
   virtual ~Resource() = default;
-  virtual PluginInitializeStatus Initialize(ResourceInterface resource_interface) = 0;
+  virtual void Initialize(ResourceInterface resource_interface) = 0;
 };
 
 }  // namespace psyche
