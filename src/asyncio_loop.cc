@@ -11,13 +11,15 @@ void AsyncioLoop::Start() {
 }
 
 void AsyncioLoop::Stop() {
-  py::gil_scoped_acquire gil;
-  if (loop_.is_none()) return;
-  loop_.attr("call_soon_threadsafe")(loop_.attr("stop"));
-  py::gil_scoped_release release;
+  {
+    py::gil_scoped_acquire gil;
+    if (loop_.is_none()) return;
+    loop_.attr("call_soon_threadsafe")(loop_.attr("stop"));
+  }
   if (thread_.joinable()) {
     thread_.join();
   }
+  ready_ = false;
 }
 
 bool AsyncioLoop::IsCoroutine(py::object func) {
@@ -25,7 +27,7 @@ bool AsyncioLoop::IsCoroutine(py::object func) {
   return inspect.attr("iscoroutinefunction")(func).cast<bool>();
 }
 
-py::object AsyncioLoop::RunSync(
+void AsyncioLoop::RunSync(
     py::object func,
     std::optional<py::args> args,
     std::optional<py::kwargs> kwargs) {
@@ -33,23 +35,29 @@ py::object AsyncioLoop::RunSync(
   py::args safe_args = args.has_value() ? *args : py::args();
   py::kwargs safe_kwargs = kwargs.has_value() ? *kwargs : py::kwargs();
   py::module_ asyncio = py::module_::import("asyncio");
+
+  if (!func) {
+    spdlog::error("Error in RunSync: function is not defined");
+    return;
+  }
+
   if (IsCoroutine(func)) {
     py::object future =
         asyncio.attr("run_coroutine_threadsafe")(func(*safe_args, **safe_kwargs), loop_);
-    py::object result = future.attr("result")();
-    return result;
+    py::object exc = future.attr("exception")();
+    if (!exc.is_none())
+      spdlog::error("Error in RunSync: {}", py::str(exc).cast<std::string>());
   } else {
-    // Use C++ synchronization primitives
     std::mutex mutex;
     std::condition_variable cv;
     bool ready = false;
-    py::object result_value;
 
-    // Create a wrapper function that will execute the Python code and notify when done
     auto wrapper = [&]() {
-      // Execute the Python function (with GIL already held by the event loop)
-      py::object res = func(*safe_args, **safe_kwargs);
-      result_value = res;
+      try {
+        py::object res = func(*safe_args, **safe_kwargs);
+      } catch (const py::error_already_set& e) {
+        spdlog::error("Error in RunSync: {}", e.what());
+      }
       ready = true;
       cv.notify_one();
     };
@@ -63,8 +71,6 @@ py::object AsyncioLoop::RunSync(
       std::unique_lock<std::mutex> lock(mutex);
       cv.wait(lock, [&ready] { return ready; });
     }
-
-    return result_value;
   }
 }
 
@@ -78,10 +84,15 @@ void AsyncioLoop::ScheduleFunction(
   py::kwargs safe_kwargs = kwargs.has_value() ? *kwargs : py::kwargs();
   py::module_ asyncio = py::module_::import("asyncio");
   auto lock_ptr = std::make_shared<std::shared_lock<std::shared_mutex>>(std::move(lock));
+
   if (IsCoroutine(func)) {
-    // Will need to try-catch so the lock can be released if the coroutine fails
+    auto py_done_callback = py::cpp_function([lock_ptr](py::object future) {
+      py::object exc = future.attr("exception")();
+      if (!exc.is_none())
+        spdlog::error("Error in ScheduleFunction: {}", py::str(exc).cast<std::string>());
+    });
+
     py::object future = asyncio.attr("run_coroutine_threadsafe")(func(*safe_args, **safe_kwargs), loop_);
-    auto py_done_callback = py::cpp_function([lock_ptr](py::object) {});
     future.attr("add_done_callback")(py_done_callback);
   } else {
     auto wrapper = [func, safe_args, safe_kwargs, lock_ptr]() {
@@ -116,6 +127,7 @@ void AsyncioLoop::Run() {
   try {
     loop_.attr("run_until_complete")(loop_.attr("shutdown_asyncgens")());
     loop_.attr("close")();
+    loop_ = py::none();
   } catch (const py::error_already_set& e) {
     spdlog::error("Error in Python shutdown: {}", e.what());
   }

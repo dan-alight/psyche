@@ -31,7 +31,6 @@ enum class PluginLoadStatus {
   kSuccess,
   kAlreadyLoaded,
   kFileNotFound,
-  kLoadError,
   kInvalidPlugin,
 };
 

@@ -41,16 +41,11 @@ def interrupt(self, channel_id):
     log(f"Interrupt signal sent for channel {channel_id}")
 
 @invokable
-def chat_out(self, channel_id):
+def get_chat_output(self, channel_id):
   self.receiving_channels.append(channel_id)
 
 @invokable
-def chat_in(self, channel_id):
-  if self.resource_info is None:
-    # queue it up
-    pass
-
-
+def get_chat_input_channel(self, channel_id):
   new_channel_id = self.interface.get_new_channel_id()
   callback = partial(receive_chat_input, self)
   self.interface.register_callback(new_channel_id, callback)

@@ -1,4 +1,4 @@
-from pyplugin import Agent, InvokeCommand, PluginInitializeStatus, log, to_string
+from pyplugin import Agent, InvokeCommand, log, to_string
 import json
 import asyncio
 from psyche_agent.invokable import get_invokable

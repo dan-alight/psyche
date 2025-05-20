@@ -114,7 +114,7 @@ void WebSocketsServer::OnMessage(WebSocket* ws, std::string_view message, uWS::O
       
       // Right now we're just assuming the data is a null-terminated char array.
       // Later we can support something like struct S { char* data; size_t size; size_t offset; };
-      char* data_ptr = std::any_cast<char>(payload.data.get());
+      char* data_ptr = std::any_cast<char*>(*payload.data);
       size_t payload_size = std::strlen(data_ptr);
       std::vector<char> response(header_size + payload_size);
       response[0] = static_cast<char>(ResponseId::kPayload);

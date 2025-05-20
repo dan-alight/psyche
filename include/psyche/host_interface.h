@@ -8,10 +8,8 @@
 #include <variant>
 
 #include "bitwise.h"
-#include "pybind11/pytypes.h"
 
 namespace psyche {
-namespace py = pybind11;
 
 struct InvokeCommand {
   int64_t sender_channel_id;
@@ -56,7 +54,7 @@ struct AgentInterface : public PluginInterface {
   std::function<void(StopStreamCommand)> stop_stream;
 
   struct Internal {
-    std::function<void(int64_t, py::object)> py_register_callback;
+    std::function<void(int64_t, std::any)> internal_register_callback;
   } internal;
 };
 

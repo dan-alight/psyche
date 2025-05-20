@@ -1,12 +1,12 @@
 from pyplugin import Payload, to_string, log
 import json
 
-def receive_chat_input(self, payload):
-  pass
-  """ s = to_string(payload.data)
-  s_len = len(s)
-  for id in self.receiving_channels:
-    self.interface.send_payload(Payload(id, s, s_len)) """
+async def receive_chat_input(self, payload):
+  if self.resource_info is None:
+    log("Resource info not available yet.")
+    return
+  log("Received chat input: "+ to_string(payload.data))
+    
 
 def receive_resource_info(self, payload):
   s = to_string(payload.data)

@@ -47,10 +47,9 @@ function(apply_standard_cpp_plugin_build_settings TARGET)
   target_include_directories(${TARGET} PRIVATE 
     ${PROJECT_SOURCE_DIR}/include/psyche
     ${PROJECT_SOURCE_DIR}/ext/rapidjson/include
-    ${PROJECT_SOURCE_DIR}/ext/pybind11/include
   )
   target_link_libraries(${TARGET} PRIVATE
-    pybind11::embed # Necessary just to find Python.h.
+
   )
   target_compile_features(${TARGET} PRIVATE cxx_std_23)
   set_target_properties(${TARGET} PROPERTIES

@@ -43,7 +43,7 @@ Executor::Executor()
 }
 
 void Executor::Start() {
-  py::scoped_interpreter interpreter_;
+  py::scoped_interpreter guard;
   py::gil_scoped_release release;
   websockets_server_.Start();
   asyncio_loop_.Start();
@@ -65,6 +65,9 @@ void Executor::Start() {
       StopAgent();
       StartAgent();
     } else {
+      if (chat_send_id_ == -1) continue;
+      message_processor_.EnqueueMessage(
+          Payload{chat_send_id_, std::make_shared<std::any>(std::string(command))});
       /* std::string cout_json = ToJson({{"name", "cout"}});
       auto data = std::make_shared<std::any>(command);
       message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data}); */
@@ -84,10 +87,7 @@ void Executor::StartAgent() {
   // plugin_manager.SetPluginsDir(plugins_dir);
 
   PluginLoadStatus load_status = plugin_manager.Load(plugin_dir);
-  if (load_status != PluginLoadStatus::kSuccess) {
-    spdlog::error("Failed to load plugin: {}", std::string(kAgentName));
-    return;
-  }
+  if (load_status != PluginLoadStatus::kSuccess) return;
 
   std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
   PyPlugin* pyplugin = static_cast<PyPlugin*>((*holder).plugin);
@@ -109,24 +109,18 @@ void Executor::StartAgent() {
   agent_interface.send_payload = [this](Payload payload) -> void {
     message_processor_.EnqueueMessage(std::move(payload));
   };
-  agent_interface.internal.py_register_callback =
-      [this](int64_t channel_id, py::object callback) -> void {
+  agent_interface.internal.internal_register_callback =
+      [this](int64_t channel_id, std::any callback) -> void {
     auto callback_wrapper = [this, callback](Payload payload) {
       std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(std::string(kAgentName));
       py::gil_scoped_acquire gil;
       py::args args = py::make_tuple(py::cast(payload));
-      asyncio_loop_.ScheduleFunction(std::move(holder->lock), callback, args);
+      asyncio_loop_.ScheduleFunction(
+          std::move(holder->lock), std::any_cast<py::object>(callback), args);
     };
-    message_processor_.RegisterPyCallback(
-        channel_id, std::move(callback_wrapper));
+    message_processor_.RegisterPyCallback(channel_id, std::move(callback_wrapper));
   };
-  try {
-    agent->Initialize(agent_interface);
-  } catch (const std::exception& e) {
-    spdlog::error("Failed to initialize agent: {}", e.what());
-    return;
-  }
-  spdlog::info("Plugin {} initialized", kAgentName);
+  agent->Initialize(agent_interface);
 
   int64_t generic_id = message_processor_.GetNewChannelId();
   chat_send_id_ = -1;
@@ -137,7 +131,7 @@ void Executor::StartAgent() {
       [](Payload payload) -> void {
         auto s = std::any_cast<std::string>(*payload.data);
       });
-  std::string chat_out_json = ToJson({{"name", "chat_out"}});
+  std::string chat_out_json = ToJson({{"name", "get_chat_output"}});
   message_processor_.EnqueueMessage(InvokeCommand{chat_receive_id, std::string(kAgentName), chat_out_json, nullptr});
 
   message_processor_.RegisterCallback(
@@ -145,8 +139,9 @@ void Executor::StartAgent() {
       [this](Payload payload) -> void {
         chat_send_id_ = std::any_cast<int64_t>(*payload.data);
       });
-  std::string chat_in_json = ToJson({{"name", "chat_in"}});
+  std::string chat_in_json = ToJson({{"name", "get_chat_input_channel"}});
   message_processor_.EnqueueMessage(InvokeCommand{generic_id, std::string(kAgentName), chat_in_json});
+  spdlog::info("Plugin {} initialized", kAgentName);
 }
 
 void Executor::StopAgent() {
@@ -165,9 +160,10 @@ void Executor::StopAgent() {
   std::unique_lock<std::shared_mutex> lock(*mut);
   lock.unlock();
   agent->Uninitialize();
-  PluginUnloadStatus status = plugin_manager.Unload(std::string(kAgentName));
-  if (status == PluginUnloadStatus::kSuccess)
-    spdlog::info("Plugin {} unloaded successfully", std::string(kAgentName));
+  plugin_manager.Unload(std::string(kAgentName));
+
+  chat_send_id_ = -1;
+  spdlog::info("Plugin {} unloaded", std::string(kAgentName));
 }
 
 }  // namespace psyche

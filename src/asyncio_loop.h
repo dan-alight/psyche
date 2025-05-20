@@ -18,10 +18,7 @@ class AsyncioLoop {
  public:
   void Start();
   void Stop();
-
-  // void schedule_coroutine(py::object coro);
-
-  py::object RunSync(
+  void RunSync(
       py::object func,
       std::optional<py::args> args = std::nullopt,
       std::optional<py::kwargs> kwargs = std::nullopt);

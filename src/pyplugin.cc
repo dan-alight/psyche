@@ -223,11 +223,11 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
         a.invoke(ic);
       })
       .def("invoke_with_callback", [](AgentInterface& a, const InvokeCommand& ic, py::object cb) {
-        a.internal.py_register_callback(ic.sender_channel_id, cb);
+        a.internal.internal_register_callback(ic.sender_channel_id, cb);
         a.invoke(ic);
       })
       .def("register_callback", [](AgentInterface& a, int64_t channel_id, py::object cb) {
-        a.internal.py_register_callback(channel_id, cb);
+        a.internal.internal_register_callback(channel_id, cb);
       })
       .def("stop_stream", [](AgentInterface& a, const StopStreamCommand& ssc) {
         a.stop_stream(ssc);

@@ -16,12 +16,49 @@
 
 namespace psyche {
 namespace py = pybind11;
+
+namespace {
+void RemovePythonPackage(const std::string& dir) {
+  std::string name = dir.substr(dir.find_last_of("/\\") + 1);
+
+  py::gil_scoped_acquire gil;
+  py::module_ sys = py::module_::import("sys");
+  py::dict modules = sys.attr("modules");
+  std::vector<std::string> to_remove;
+  for (auto& item : modules) {
+    std::string modname = py::str(item.first);
+    if (modname == name || modname.rfind(name + ".", 0) == 0) {
+      to_remove.push_back(modname);
+    }
+  }
+  for (const auto& modname : to_remove) {
+    modules.attr("pop")(modname);
+  }
+
+  std::string parent_dir = std::filesystem::path(dir).parent_path().string();
+  std::string venv_path = dir + "/venv";
+  std::string site_packages = venv_path + "/lib/site-packages";
+  py::list sys_path = sys.attr("path").cast<py::list>();
+
+#if defined(_WIN32)
+  sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32");
+  sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32/lib");
+#endif
+  sys_path.attr("remove")(parent_dir);
+  sys_path.attr("remove")(site_packages);
+
+  // Optionally: force garbage collection
+  py::module_ gc = py::module_::import("gc");
+  gc.attr("collect")();
+}
+}  // namespace
+
 PluginLoadStatus PluginManager::Load(const std::string& dir) {
   std::string info_path = dir + "/info.json";
   std::ifstream file(info_path);
   if (!file.is_open()) {
-    spdlog::error("Could not open plugin info file: {}", info_path);
-    return PluginLoadStatus::kInvalidPlugin;
+    spdlog::error("Plugin info.json missing: {}", info_path);
+    return PluginLoadStatus::kFileNotFound;
   }
 
   std::ostringstream ss;
@@ -88,7 +125,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
       if (error == ERROR_FILE_NOT_FOUND) {
         return PluginLoadStatus::kFileNotFound;
       }
-      return PluginLoadStatus::kLoadError;
+      return PluginLoadStatus::kInvalidPlugin;
     }
 
     // Get the GetPluginInstance function pointer
@@ -149,10 +186,9 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
 
   } else if (std::strcmp(language, "python") == 0) {
     py::gil_scoped_acquire gil;
-    py::module_ sys = py::module_::import("sys");
     py::module_ importlib = py::module_::import("importlib");
     py::module_ os = py::module_::import("os");
-
+    py::module_ sys = py::module_::import("sys");
     std::string venv_path = dir + "/venv";
     if (!std::filesystem::exists(venv_path)) {
       std::string command = "python -m venv " + venv_path;
@@ -174,7 +210,6 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
       }
     }
 
-    // When each plugin has a sub-interpreter, don't need to worry about sys.path clutter
     std::string parent_dir = std::filesystem::path(dir).parent_path().string();
     std::string site_packages = venv_path + "/lib/site-packages";
     py::list sys_path = sys.attr("path").cast<py::list>();
@@ -184,6 +219,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
     sys_path.insert(0, venv_path + "/Lib/site-packages/win32/lib");
     sys_path.insert(0, venv_path + "/Lib/site-packages/win32");
 #endif
+
     try {
       py::module_ mod = py::module_::import(name);
       py::object plugin_class = mod.attr(SnakeToPascal(name).c_str());
@@ -195,6 +231,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
           std::make_unique<PluginData>(dir, PluginLanguage::kPython, type, plugin));
     } catch (const py::error_already_set& e) {
       spdlog::error("Error loading Python plugin: {}", e.what());
+      RemovePythonPackage(dir);
       return PluginLoadStatus::kInvalidPlugin;
     }
   } else {
@@ -230,41 +267,8 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
     // Unload Python plugin
     try {
       py::gil_scoped_acquire gil;
-
       delete plugin;
-
-      // Remove the plugin module from sys.modules to allow re-import
-      py::module_ sys = py::module_::import("sys");
-      py::dict modules = sys.attr("modules");
-      std::vector<std::string> to_remove;
-      std::string prefix = name;  // e.g., "python_agent"
-      for (auto item : modules) {
-        std::string modname = py::str(item.first);
-        if (modname == prefix || modname.rfind(prefix + ".", 0) == 0) {
-          to_remove.push_back(modname);
-        }
-      }
-      for (const auto& modname : to_remove) {
-        modules.attr("pop")(modname);
-      }
-
-      // Remove sys.path entries that were appended in LoadPython
-      std::string parent_dir = std::filesystem::path(plugin_data.dir).parent_path().string();
-      std::string venv_path = plugin_data.dir + "/venv";
-      std::string site_packages = venv_path + "/lib/site-packages";
-      py::list sys_path = sys.attr("path").cast<py::list>();
-
-#if defined(_WIN32)
-      sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32");
-      sys_path.attr("remove")(venv_path + "/Lib/site-packages/win32/lib");
-#endif
-      sys_path.attr("remove")(parent_dir);
-      sys_path.attr("remove")(site_packages);
-
-      // Optionally: force garbage collection
-      py::module_ gc = py::module_::import("gc");
-      gc.attr("collect")();
-
+      RemovePythonPackage(plugin_data.dir);
     } catch (const py::error_already_set& e) {
       spdlog::error("Error unloading Python plugin: {}", e.what());
       return PluginUnloadStatus::kUnloadError;
