@@ -40,6 +40,9 @@ struct Payload {
 
 struct PluginInterface {
   std::function<void(Payload)> send_payload;
+
+  std::function<void()> on_initialized;
+
   // functions for network access
   // functions for registering regular (e.g every 1000ms or 5000ms, etc) callbacks
 };
@@ -53,8 +56,13 @@ struct AgentInterface : public PluginInterface {
   std::function<void(int64_t, std::function<void(Payload)>)> register_callback;
   std::function<void(StopStreamCommand)> stop_stream;
 
+  std::function<void(std::any)> schedule_task;
+
+  // functions for registering regular (e.g every 1000ms or 5000ms, etc) callbacks
+
   struct Internal {
     std::function<void(int64_t, std::any)> internal_register_callback;
+
   } internal;
 };
 

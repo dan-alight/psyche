@@ -295,7 +295,7 @@ std::optional<PluginHolder> PluginManager::GetPlugin(const std::string& name) {
   auto& plugin_data = *it->second;
   if (!plugin_data.alive) return {};
 
-  return PluginHolder{plugin_data.plugin, plugin_data.mut, plugin_data.language, plugin_data.type};
+  return PluginHolder(plugin_data);
 }
 
 void PluginManager::DisablePluginAccess(const std::string& name) {

@@ -85,6 +85,11 @@ void AsyncioLoop::ScheduleFunction(
   py::module_ asyncio = py::module_::import("asyncio");
   auto lock_ptr = std::make_shared<std::shared_lock<std::shared_mutex>>(std::move(lock));
 
+  if (!func) {
+    spdlog::error("Error in ScheduleFunction: function is not defined");
+    return;
+  }
+
   if (IsCoroutine(func)) {
     auto py_done_callback = py::cpp_function([lock_ptr](py::object future) {
       py::object exc = future.attr("exception")();

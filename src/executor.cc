@@ -45,10 +45,20 @@ Executor::Executor()
 void Executor::Start() {
   py::scoped_interpreter guard;
   py::gil_scoped_release release;
-  websockets_server_.Start();
+  message_processor_.Start();
   asyncio_loop_.Start();
   StartAgent();
-  message_processor_.Start();
+  {
+    std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(kAgentName.data());
+    if (holder) {
+      std::unique_lock lock(mutex_);
+      cv_.wait(lock, [&holder] {
+        auto initialized = holder->initialized.lock();
+        return *initialized;
+      });
+    }
+  }
+  websockets_server_.Start();
 
   std::string command;
   while (true) {
@@ -57,10 +67,10 @@ void Executor::Start() {
       break;
     } else if (command == "c") {
       std::string compute_json = ToJson({{"name", "compute"}});
-      message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), compute_json, nullptr});
+      message_processor_.EnqueueMessage(InvokeCommand{-1, kAgentName.data(), compute_json, nullptr});
     } else if (command == "i") {
       std::string interrupt_json = ToJson({{"name", "interrupt"}});
-      message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), interrupt_json, nullptr});
+      message_processor_.EnqueueMessage(InvokeCommand{-1, kAgentName.data(), interrupt_json, nullptr});
     } else if (command == "r") {
       StopAgent();
       StartAgent();
@@ -68,28 +78,25 @@ void Executor::Start() {
       if (chat_send_id_ == -1) continue;
       message_processor_.EnqueueMessage(
           Payload{chat_send_id_, std::make_shared<std::any>(std::string(command))});
-      /* std::string cout_json = ToJson({{"name", "cout"}});
-      auto data = std::make_shared<std::any>(command);
-      message_processor_.EnqueueMessage(InvokeCommand{-1, std::string(kAgentName), cout_json, data}); */
     }
   }
 
-  message_processor_.Stop();
+  websockets_server_.Stop();
   StopAgent();
   asyncio_loop_.Stop();
-  websockets_server_.Stop();
+  message_processor_.Stop();
 }
 
 void Executor::StartAgent() {
   std::string exe_dir = GetExecutableDir();
   auto& plugin_manager = PluginManager::Get();
-  auto plugin_dir = exe_dir + "/" + std::string(kAgentName);
+  auto plugin_dir = exe_dir + "/" + kAgentName.data();
   // plugin_manager.SetPluginsDir(plugins_dir);
 
   PluginLoadStatus load_status = plugin_manager.Load(plugin_dir);
   if (load_status != PluginLoadStatus::kSuccess) return;
 
-  std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
+  std::optional<PluginHolder> holder = plugin_manager.GetPlugin(kAgentName.data());
   PyPlugin* pyplugin = static_cast<PyPlugin*>((*holder).plugin);
   pyplugin->SetLoop(&asyncio_loop_);
   Agent* agent = static_cast<Agent*>((*holder).plugin);
@@ -112,7 +119,7 @@ void Executor::StartAgent() {
   agent_interface.internal.internal_register_callback =
       [this](int64_t channel_id, std::any callback) -> void {
     auto callback_wrapper = [this, callback](Payload payload) {
-      std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(std::string(kAgentName));
+      std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(kAgentName.data());
       py::gil_scoped_acquire gil;
       py::args args = py::make_tuple(py::cast(payload));
       asyncio_loop_.ScheduleFunction(
@@ -120,39 +127,58 @@ void Executor::StartAgent() {
     };
     message_processor_.RegisterPyCallback(channel_id, std::move(callback_wrapper));
   };
+  agent_interface.schedule_task = [this](std::any task) -> void {
+    auto callback = [this, task]() {
+      py::gil_scoped_acquire gil;
+      auto python_task = std::any_cast<PyFunctionWithArgs>(task);
+      std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(kAgentName.data());
+      if (!holder) return;
+      asyncio_loop_.ScheduleFunction(
+          std::move(holder->lock), python_task.func, python_task.args, python_task.kwargs);
+    };
+    auto t = MakeTask(callback, std::make_unique<PyTaskDeleter>());
+    message_processor_.EnqueueMessage(t);
+  };
+  agent_interface.on_initialized = [this]() -> void {
+    int64_t generic_id = message_processor_.GetNewChannelId();
+    chat_send_id_ = -1;
+    int64_t chat_receive_id = message_processor_.GetNewChannelId();
+
+    message_processor_.RegisterCallback(
+        chat_receive_id,
+        [](Payload payload) -> void {
+          auto s = std::any_cast<std::string>(*payload.data);
+          spdlog::info("Chat output: {}", s);
+        });
+    std::string chat_out_json = ToJson({{"name", "get_chat_output"}});
+    message_processor_.EnqueueMessage(InvokeCommand{chat_receive_id, kAgentName.data(), chat_out_json, nullptr});
+
+    message_processor_.RegisterCallback(
+        generic_id,
+        [this](Payload payload) -> void {
+          chat_send_id_ = std::any_cast<int64_t>(*payload.data);
+        });
+    std::string chat_in_json = ToJson({{"name", "get_chat_input_channel"}});
+    message_processor_.EnqueueMessage(InvokeCommand{generic_id, kAgentName.data(), chat_in_json});
+
+    spdlog::info("Plugin {} initialized", kAgentName);
+
+    std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(kAgentName.data());
+    *holder->initialized.lock() = true;
+    cv_.notify_one();
+  };
   agent->Initialize(agent_interface);
-
-  int64_t generic_id = message_processor_.GetNewChannelId();
-  chat_send_id_ = -1;
-  int64_t chat_receive_id = message_processor_.GetNewChannelId();
-
-  message_processor_.RegisterCallback(
-      chat_receive_id,
-      [](Payload payload) -> void {
-        auto s = std::any_cast<std::string>(*payload.data);
-      });
-  std::string chat_out_json = ToJson({{"name", "get_chat_output"}});
-  message_processor_.EnqueueMessage(InvokeCommand{chat_receive_id, std::string(kAgentName), chat_out_json, nullptr});
-
-  message_processor_.RegisterCallback(
-      generic_id,
-      [this](Payload payload) -> void {
-        chat_send_id_ = std::any_cast<int64_t>(*payload.data);
-      });
-  std::string chat_in_json = ToJson({{"name", "get_chat_input_channel"}});
-  message_processor_.EnqueueMessage(InvokeCommand{generic_id, std::string(kAgentName), chat_in_json});
-  spdlog::info("Plugin {} initialized", kAgentName);
 }
 
 void Executor::StopAgent() {
   auto& plugin_manager = PluginManager::Get();
-  std::optional<PluginHolder> holder = plugin_manager.GetPlugin(std::string(kAgentName));
+  std::optional<PluginHolder> holder = plugin_manager.GetPlugin(kAgentName.data());
   if (!holder) return;
 
   Plugin* plugin = holder->plugin;
   Agent* agent = static_cast<Agent*>(plugin);
 
-  plugin_manager.DisablePluginAccess(std::string(kAgentName));
+  plugin_manager.DisablePluginAccess(kAgentName.data());
 
   holder->lock.unlock();
   std::shared_mutex* mut = holder->lock.mutex();
@@ -160,10 +186,10 @@ void Executor::StopAgent() {
   std::unique_lock<std::shared_mutex> lock(*mut);
   lock.unlock();
   agent->Uninitialize();
-  plugin_manager.Unload(std::string(kAgentName));
+  plugin_manager.Unload(kAgentName.data());
 
   chat_send_id_ = -1;
-  spdlog::info("Plugin {} unloaded", std::string(kAgentName));
+  spdlog::info("Plugin {} unloaded", kAgentName.data());
 }
 
 }  // namespace psyche

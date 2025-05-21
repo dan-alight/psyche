@@ -25,7 +25,12 @@ void MessageProcessor::Stop() {
   // Must clear them before Python interpreter shuts down.
   py::gil_scoped_acquire gil;
   registered_callbacks_.clear();
+
+  // also need to clear the Tasks
+  Message message;
+  while (message_queue_.try_dequeue(message)) {}
 }
+
 void MessageProcessor::Run() {
   running_ = true;
   Message message;
@@ -36,6 +41,8 @@ void MessageProcessor::Run() {
     } else if constexpr (std::is_same_v<T, StopStreamCommand>) {
     } else if constexpr (std::is_same_v<T, Payload>) {
       ProcessPayload(arg);
+    } else if constexpr (std::is_same_v<T, Task>) {
+      ProcessTask(arg);
     } else if constexpr (std::is_same_v<T, ExitLoop>) {
       running_ = false;
     }
@@ -44,6 +51,10 @@ void MessageProcessor::Run() {
     message_queue_.wait_dequeue(message);
     std::visit(visitor, message);
   }
+}
+
+void MessageProcessor::ProcessTask(const Task& task) {
+  task->func();
 }
 
 void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
@@ -117,4 +128,5 @@ void MessageProcessor::RegisterPyCallback(int64_t channel_id, std::function<void
   registered_callbacks_[channel_id] =
       Callback{std::make_shared<std::function<void(Payload)>>(callback), true};
 }
+
 }  // namespace psyche

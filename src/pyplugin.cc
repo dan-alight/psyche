@@ -104,6 +104,7 @@ using psyche::PayloadFlags;
 using psyche::Plugin;
 using psyche::PluginInterface;
 using psyche::PyAgent;
+using psyche::PyFunctionWithArgs;
 using psyche::PyPlugin;
 using psyche::PyResource;
 using psyche::Resource;
@@ -212,6 +213,9 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def(py::init<>())
       .def("send_payload", [](PluginInterface& p, const Payload& payload) {
         p.send_payload(payload);
+      })
+      .def("on_initialized", [](PluginInterface& p) {
+        p.on_initialized();
       });
 
   py::class_<AgentInterface, PluginInterface>(m, "AgentInterface")
@@ -227,11 +231,17 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
         a.invoke(ic);
       })
       .def("register_callback", [](AgentInterface& a, int64_t channel_id, py::object cb) {
-        a.internal.internal_register_callback(channel_id, cb);
+        a.internal.internal_register_callback(channel_id, std::move(cb));
       })
       .def("stop_stream", [](AgentInterface& a, const StopStreamCommand& ssc) {
         a.stop_stream(ssc);
-      });
+      })
+      // clang-format off
+      .def("schedule_task", [](AgentInterface& a, py::object task, py::args args, py::kwargs kwargs) {
+          a.schedule_task(PyFunctionWithArgs{std::move(task), std::move(args), std::move(kwargs)});
+      },
+      py::arg("callable"));
+  // clang-format on
 
   py::class_<Plugin, PyPlugin, py::smart_holder>(m, "Plugin")
       .def(py::init<>());

@@ -58,6 +58,15 @@ struct type_caster<std::shared_ptr<std::any>> {
 }  // namespace pybind11::detail
 
 namespace psyche {
+namespace py = pybind11;
+
+struct PyFunctionWithArgs {
+  py::object func;
+  py::args args;
+  py::kwargs kwargs;
+
+};
+
 class PyAgent : public Agent, public py::trampoline_self_life_support {
  public:
   void SetLoop(AsyncioLoop* asyncio_loop);
@@ -78,10 +87,6 @@ class PyAgent : public Agent, public py::trampoline_self_life_support {
  private:
   AsyncioLoop* asyncio_loop_;
 };
-}  // namespace psyche
-
-namespace psyche {
-namespace py = pybind11;
 
 class PyPlugin : public Plugin, public py::trampoline_self_life_support {
  public:

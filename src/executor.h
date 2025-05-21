@@ -1,7 +1,9 @@
 #ifndef PSYCHE_EXECUTOR_H_
 #define PSYCHE_EXECUTOR_H_
 
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "asyncio_loop.h"
@@ -28,7 +30,8 @@ class Executor {
   CommandHandler command_handler_;
   WebSocketsServer websockets_server_;
   MessageProcessor message_processor_;
-
+  std::mutex mutex_;
+  std::condition_variable cv_;
   int64_t chat_send_id_ = -1;
 };
 }  // namespace psyche

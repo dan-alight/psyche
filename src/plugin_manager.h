@@ -52,6 +52,7 @@ struct PluginData {
   PluginLibPtr ptr = nullptr;
   Plugin* plugin;
   std::shared_mutex mut;
+  std::shared_ptr<bool> initialized = std::make_shared<bool>(false);
   bool alive = true;
 
   PluginData(
@@ -83,9 +84,14 @@ struct PluginHolder {
   std::shared_lock<std::shared_mutex> lock;
   PluginLanguage language;
   PluginType type;
+  std::weak_ptr<bool> initialized;
 
-  PluginHolder(Plugin* plugin, std::shared_mutex& mut, PluginLanguage language, PluginType type)
-      : plugin(plugin), lock(mut), language(language), type(type) {
+  PluginHolder(PluginData& plugin_data)
+      : plugin(plugin_data.plugin),
+        lock(plugin_data.mut),
+        language(plugin_data.language),
+        type(plugin_data.type),
+        initialized(plugin_data.initialized) {
   }
 
   Plugin* operator->() const {
