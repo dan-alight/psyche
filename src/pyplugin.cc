@@ -47,7 +47,7 @@ void PyAgent::StopStream(int64_t channel_id) {
 void PyAgent::Initialize(AgentInterface agent_interface) {
   py::gil_scoped_acquire gil;
   py::function override = py::get_override(this, "initialize");
-  asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));
+  asyncio_loop_->RunSync(override, py::make_tuple(agent_interface));  
 }
 
 void PyAgent::PluginAdded(std::string plugin_info) {
@@ -214,8 +214,8 @@ PYBIND11_EMBEDDED_MODULE(pyplugin, m) {
       .def("send_payload", [](PluginInterface& p, const Payload& payload) {
         p.send_payload(payload);
       })
-      .def("on_initialized", [](PluginInterface& p) {
-        p.on_initialized();
+      .def("on_initialized", [](PluginInterface& p, bool success) {
+        p.on_initialized(success);
       });
 
   py::class_<AgentInterface, PluginInterface>(m, "AgentInterface")

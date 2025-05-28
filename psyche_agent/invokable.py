@@ -1,8 +1,8 @@
-from pyplugin import log, Payload, PayloadFlags, to_string
+from pyplugin import log, Payload, PayloadFlags, to_string, InvokeCommand
 import asyncio
 from functools import partial
-from psyche_agent.callback import receive_chat_input
-from openai import AsyncOpenAI
+from psyche_agent.callback import receive_chat_input, receive_resource_info
+import json
 
 _invokable_registry = {}
 
@@ -33,16 +33,12 @@ async def compute(self, channel_id):
     # Clean up event after computation
     self.compute_interrupt_events.pop(channel_id, None)
 
-@invokable
+@invokable  
 def interrupt(self, channel_id):
   event = self.compute_interrupt_events.get(channel_id)
   if event:
     event.set()
     log(f"Interrupt signal sent for channel {channel_id}")
-
-@invokable
-def get_chat_output(self, channel_id):
-  self.receiving_channels.append(channel_id)
 
 @invokable
 def get_chat_input_channel(self, channel_id):
@@ -51,3 +47,8 @@ def get_chat_input_channel(self, channel_id):
   self.interface.register_callback(new_channel_id, callback)
   flags = PayloadFlags.FINAL
   self.interface.send_payload(Payload(channel_id, new_channel_id, flags))
+
+@invokable
+def get_chat_output(self, channel_id):
+  self.receiving_channels.append(channel_id)
+

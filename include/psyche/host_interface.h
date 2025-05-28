@@ -41,7 +41,7 @@ struct Payload {
 struct PluginInterface {
   std::function<void(Payload)> send_payload;
 
-  std::function<void()> on_initialized;
+  std::function<void(bool)> on_initialized;
 
   // functions for network access
   // functions for registering regular (e.g every 1000ms or 5000ms, etc) callbacks

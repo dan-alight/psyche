@@ -63,19 +63,19 @@ void MessageProcessor::ProcessInvokeCommand(const InvokeCommand& command) {
     return;
   }
 
-  std::optional<PluginHolder> holder = PluginManager::Get().GetPlugin(command.to);
+  std::optional<PluginExecutionContext> ctx = PluginManager::Get().GetPlugin(command.to);
   // Could be that the plugin is unloading; could be that it doesn't exist.
   // Could even be that the loaded plugins mutex is unavailable.
   // Will have to deal with this somehow.
-  if (!holder.has_value()) {
+  if (!ctx.has_value()) {
     spdlog::warn("Could not process InvokeCommand. Plugin {} not available", command.to);
     return;
   }
 
-  if (holder->type == PluginType::kAgent) {
-    if (holder->language == PluginLanguage::kPython) {
-      auto* plugin = static_cast<PyAgent*>(holder->plugin);
-      plugin->Invoke(command.sender_channel_id, command.data, command.aux, std::move(holder->lock));
+  if (ctx->type == PluginType::kAgent) {
+    if (ctx->language == PluginLanguage::kPython) {
+      auto* plugin = static_cast<PyAgent*>(ctx->plugin);
+      plugin->Invoke(command.sender_channel_id, command.data, command.aux, std::move(ctx->lock));
     }
   }
 }

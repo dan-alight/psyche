@@ -44,6 +44,7 @@ async def get_connection():
   if _connection is None:
     db_path = pathlib.Path(__file__).parent / "sqlite.db"
     _connection = await aiosqlite.connect(db_path)
+    await _connection.execute("PRAGMA foreign_keys = ON;")  # Enable foreign keys
     await _init_schema(_connection)
   return _connection
 

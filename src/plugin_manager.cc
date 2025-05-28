@@ -182,7 +182,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
 
     loaded_plugins_.emplace(
         name,
-        std::make_unique<PluginData>(dir, PluginLanguage::kCpp, type, plugin, lib_ptr));
+        std::make_unique<PluginFullContext>(dir, PluginLanguage::kCpp, type, plugin, lib_ptr));
 
   } else if (std::strcmp(language, "python") == 0) {
     py::gil_scoped_acquire gil;
@@ -228,7 +228,7 @@ PluginLoadStatus PluginManager::Load(const std::string& dir) {
       Plugin* plugin = instance.cast<std::unique_ptr<Plugin>>().release();
       loaded_plugins_.emplace(
           name,
-          std::make_unique<PluginData>(dir, PluginLanguage::kPython, type, plugin));
+          std::make_unique<PluginFullContext>(dir, PluginLanguage::kPython, type, plugin));
     } catch (const py::error_already_set& e) {
       spdlog::error("Error loading Python plugin: {}", e.what());
       RemovePythonPackage(dir);
@@ -247,12 +247,12 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
     return PluginUnloadStatus::kNotLoaded;
   }
 
-  PluginData& plugin_data = *it->second;
-  Plugin* plugin = plugin_data.plugin;
+  PluginFullContext& ctx = *it->second;
+  Plugin* plugin = ctx.plugin;
 
-  if (plugin_data.language == PluginLanguage::kCpp) {
+  if (ctx.language == PluginLanguage::kCpp) {
     delete plugin;
-    PluginLibPtr ptr = plugin_data.ptr;
+    PluginLibPtr ptr = ctx.ptr;
 
 #if defined(_WIN32)
     if (!FreeLibrary(ptr)) {
@@ -268,7 +268,7 @@ PluginUnloadStatus PluginManager::Unload(const std::string& name) {
     try {
       py::gil_scoped_acquire gil;
       delete plugin;
-      RemovePythonPackage(plugin_data.dir);
+      RemovePythonPackage(ctx.dir);
     } catch (const py::error_already_set& e) {
       spdlog::error("Error unloading Python plugin: {}", e.what());
       return PluginUnloadStatus::kUnloadError;
@@ -286,16 +286,16 @@ bool PluginManager::IsLoaded(const std::string& name) {
   return loaded_plugins_.contains(name);
 }
 
-std::optional<PluginHolder> PluginManager::GetPlugin(const std::string& name) {
+std::optional<PluginExecutionContext> PluginManager::GetPlugin(const std::string& name) {
   if (!loaded_plugins_available_) return {};
   std::shared_lock lock(loaded_plugins_mut_);
   auto it = loaded_plugins_.find(name);
   if (it == loaded_plugins_.end()) return {};
 
-  auto& plugin_data = *it->second;
-  if (!plugin_data.alive) return {};
+  auto& ctx = *it->second;
+  if (!ctx.alive) return {};
 
-  return PluginHolder(plugin_data);
+  return PluginExecutionContext(ctx);
 }
 
 void PluginManager::DisablePluginAccess(const std::string& name) {
@@ -304,8 +304,8 @@ void PluginManager::DisablePluginAccess(const std::string& name) {
   loaded_plugins_available_ = true;
   auto it = loaded_plugins_.find(name);
   if (it == loaded_plugins_.end()) return;
-  auto& plugin_data = *it->second;
-  plugin_data.alive = false;
+  auto& ctx = *it->second;
+  ctx.alive = false;
 }
 
 }  // namespace psyche

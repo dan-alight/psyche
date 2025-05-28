@@ -45,7 +45,7 @@ enum class PluginLanguage {
   kPython
 };
 
-struct PluginData {
+struct PluginFullContext {
   std::string dir;
   PluginLanguage language;
   PluginType type;
@@ -55,7 +55,7 @@ struct PluginData {
   std::shared_ptr<bool> initialized = std::make_shared<bool>(false);
   bool alive = true;
 
-  PluginData(
+  PluginFullContext(
       const std::string& dir,
       PluginLanguage language,
       PluginType type,
@@ -67,7 +67,7 @@ struct PluginData {
         ptr(ptr),
         plugin(plugin) {
   }
-  PluginData(
+  PluginFullContext(
       const std::string& dir,
       PluginLanguage language,
       PluginType type,
@@ -79,19 +79,19 @@ struct PluginData {
   }
 };
 
-struct PluginHolder {
+struct PluginExecutionContext {
   Plugin* plugin;
   std::shared_lock<std::shared_mutex> lock;
   PluginLanguage language;
   PluginType type;
   std::weak_ptr<bool> initialized;
 
-  PluginHolder(PluginData& plugin_data)
-      : plugin(plugin_data.plugin),
-        lock(plugin_data.mut),
-        language(plugin_data.language),
-        type(plugin_data.type),
-        initialized(plugin_data.initialized) {
+  PluginExecutionContext(PluginFullContext& ctx)
+      : plugin(ctx.plugin),
+        lock(ctx.mut),
+        language(ctx.language),
+        type(ctx.type),
+        initialized(ctx.initialized) {
   }
 
   Plugin* operator->() const {
@@ -116,7 +116,7 @@ class PluginManager {
   PluginUnloadStatus Unload(const std::string& name);
   // void SetPluginsDir(const std::string& dir);
   bool IsLoaded(const std::string& name);
-  std::optional<PluginHolder> GetPlugin(const std::string& name);
+  std::optional<PluginExecutionContext> GetPlugin(const std::string& name);
   void DisablePluginAccess(const std::string& name);
 
  private:
@@ -124,7 +124,7 @@ class PluginManager {
   ~PluginManager() = default;
 
   // std::string plugins_dir_;
-  std::unordered_map<std::string, std::unique_ptr<PluginData>> loaded_plugins_;
+  std::unordered_map<std::string, std::unique_ptr<PluginFullContext>> loaded_plugins_;
   bool loaded_plugins_available_ = true;
   std::shared_mutex loaded_plugins_mut_;
 };
