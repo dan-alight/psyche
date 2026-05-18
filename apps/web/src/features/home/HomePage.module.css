@@ -1,0 +1,23 @@
+.page {
+  width: min(60rem, calc(100% - var(--space-7)));
+  margin: 0 auto;
+  padding: var(--space-8) 0;
+}
+
+.header {
+  margin-bottom: var(--space-7);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  line-height: var(--line-height-tight);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+}
