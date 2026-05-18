@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+*.db
+*.db-shm
+*.db-wal
+*.log
+.DS_Store
+
+docs/superpowers
+apps/web/src/routeTree.gen.ts
