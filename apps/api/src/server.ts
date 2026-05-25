@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 
 import { env } from "@/env";
+import { registerProviderAccessRoutes } from "@/routes/providerAccess";
 import { registerHealthRoutes } from "@/routes/health";
 
 export async function buildServer() {
@@ -14,6 +15,10 @@ export async function buildServer() {
   });
 
   await app.register(registerHealthRoutes, { prefix: "/api" });
+  await app.register(registerProviderAccessRoutes, {
+    prefix: "/api",
+    credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY
+  });
 
   return app;
 }
