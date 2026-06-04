@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const provider = sqliteTable("provider", {
@@ -15,8 +16,13 @@ export const credential = sqliteTable("credential", {
   label: text("label").notNull(),
   kind: text("kind", { enum: ["api_key", "oauth"] }).notNull(),
   encryptedPayload: text("encrypted_payload").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp" })
-});
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  active: integer("active", { mode: "boolean" }).notNull().default(false)
+}, (table) => [
+  uniqueIndex("credential_provider_active_idx")
+    .on(table.providerId)
+    .where(sql`${table.active} = 1`)
+]);
 
 export const model = sqliteTable(
   "model",

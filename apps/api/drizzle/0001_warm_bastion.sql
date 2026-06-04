@@ -1,0 +1,2 @@
+ALTER TABLE `credential` ADD `active` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `credential_provider_active_idx` ON `credential` (`provider_id`) WHERE "credential"."active" = 1;

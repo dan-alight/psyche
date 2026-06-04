@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "pnpm --filter @psyche/shared build && tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "test": "pnpm --filter @psyche/shared build && node --import tsx --test \"src/**/*.test.ts\"",
+    "test": "pnpm --filter @psyche/shared build && vitest run",
     "typecheck": "pnpm --filter @psyche/shared build && tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
@@ -18,13 +18,16 @@
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.43.1",
     "fastify": "^5.3.3",
+    "ws": "^8.21.0",
     "zod": "^3.25.28"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.21",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.7"
   }
 }

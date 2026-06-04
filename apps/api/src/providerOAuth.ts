@@ -18,6 +18,17 @@ export type OAuthCodeExchangeInput = {
   codeVerifier: string;
 };
 
+export type OAuthRefreshInput = {
+  tokenUrl: string;
+  clientId: string;
+  refreshToken: string;
+};
+
+export type OAuthTokenResult = {
+  payload: Record<string, unknown>;
+  expiresAt?: Date;
+};
+
 export function createPkceVerifier() {
   return randomBytes(32).toString("base64url");
 }
@@ -48,7 +59,7 @@ export function buildOAuthAuthorizeUrl(input: OAuthAuthorizeUrlInput) {
   return url;
 }
 
-export async function exchangeOAuthCode(input: OAuthCodeExchangeInput) {
+export async function exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenResult> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: input.clientId,
@@ -69,11 +80,37 @@ export async function exchangeOAuthCode(input: OAuthCodeExchangeInput) {
     throw new Error(`OAuth token exchange failed with status ${response.status}`);
   }
 
-  const payload = await response.json() as Record<string, unknown>;
-  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : undefined;
+  return parseOAuthTokenResponse(await response.json());
+}
+
+export async function refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenResult> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: input.clientId,
+    refresh_token: input.refreshToken
+  });
+
+  const response = await fetch(input.tokenUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  if (!response.ok) {
+    throw new Error(`OAuth token refresh failed with status ${response.status}`);
+  }
+
+  return parseOAuthTokenResponse(await response.json());
+}
+
+function parseOAuthTokenResponse(payload: unknown): OAuthTokenResult {
+  const tokenPayload = payload as Record<string, unknown>;
+  const expiresIn = typeof tokenPayload.expires_in === "number" ? tokenPayload.expires_in : undefined;
 
   return {
-    payload,
+    payload: tokenPayload,
     expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined
   };
 }

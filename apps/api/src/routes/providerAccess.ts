@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   credentialCreateRequestSchema,
+  credentialActivateParamsSchema,
   modelCreateRequestSchema,
   oauthCallbackQuerySchema,
   oauthCompleteRequestSchema,
@@ -115,11 +116,23 @@ export async function registerProviderAccessRoutes(app: FastifyInstance, options
       label: body.label,
       kind: body.kind,
       encryptedPayload: encryptPayload(body.payload, options.credentialEncryptionKey),
-      expiresAt: body.expiresAt
+      expiresAt: body.expiresAt,
+      active: body.active ?? false
     });
     const { encryptedPayload: _encryptedPayload, ...publicCredential } = created;
 
     return reply.code(201).send(publicCredential);
+  });
+
+  app.patch("/credentials/:credentialId/active", async (request, reply) => {
+    const params = credentialActivateParamsSchema.parse(request.params);
+    const activated = await store.activateCredential(params.credentialId);
+
+    if (!activated) {
+      return reply.code(404).send({ message: "Credential not found" });
+    }
+
+    return activated;
   });
 
   app.post("/oauth-configs", async (request, reply) => {
