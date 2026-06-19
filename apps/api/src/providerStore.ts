@@ -19,6 +19,7 @@ export type CreateOAuthConfigInput = typeof oauthConfig.$inferInsert;
 export type ProviderAccessStore = {
   createProvider(input: CreateProviderInput): Promise<ProviderRecord>;
   listProviders(): Promise<ProviderRecord[]>;
+  getProviderByKey(providerKey: string): Promise<ProviderRecord | undefined>;
   createModel(input: CreateModelInput): Promise<ModelRecord>;
   listModels(providerId?: number): Promise<ModelRecord[]>;
   createCredential(input: CreateCredentialInput): Promise<CredentialRecord>;
@@ -47,6 +48,10 @@ export function createDrizzleProviderAccessStore(): ProviderAccessStore {
     },
     async listProviders() {
       return db.select().from(provider);
+    },
+    async getProviderByKey(providerKey) {
+      const rows = await db.select().from(provider).where(eq(provider.key, providerKey)).limit(1);
+      return rows[0];
     },
     async createModel(input) {
       const rows = await db.insert(model).values(input).returning();
