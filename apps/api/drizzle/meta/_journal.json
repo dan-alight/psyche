@@ -22,6 +22,41 @@
       "when": 1781759171738,
       "tag": "0002_spooky_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1781923417777,
+      "tag": "0003_split_tool_definitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1781930854429,
+      "tag": "0004_old_clea",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1781938556527,
+      "tag": "0005_grey_salo",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1781940238999,
+      "tag": "0006_simplify_conversation_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1781941583277,
+      "tag": "0007_rapid_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

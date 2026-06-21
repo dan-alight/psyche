@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
@@ -7,10 +8,10 @@ import type { ConversationItem } from "@/db/schema";
 import { ChatCompletionsClient } from "@/modelClients/ChatCompletionsClient";
 import type { ConversationState, ConversationStore } from "@/modelClients/conversationStore";
 import { ResponsesClient } from "@/modelClients/ResponsesClient";
-import type { ModelStreamEvent } from "@/modelClients/types";
+import type { ModelCallRequest, ModelStreamEvent } from "@/modelClients/types";
 
 describe("model clients", () => {
-  it("streams chat completions with persisted chat history and records the completed turn", async () => {
+  it("streams chat completions with provided chat history", async () => {
     const store = createMemoryConversationStore({
       conversationId: 7,
       previousResponseId: "resp_old",
@@ -29,17 +30,14 @@ describe("model clients", () => {
     });
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    const events = await collect(client.stream({
-      conversationId: 7,
+    const events = await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Current message" }]
-    }));
+    })));
 
     expect(requestBody?.messages).toEqual([
       { role: "user", content: "Earlier message" },
@@ -51,14 +49,6 @@ describe("model clients", () => {
       { type: "text.delta", delta: "lo" },
       { type: "response.completed", id: "chatcmpl_1", outputText: "Hello", usage: { output_tokens: 1 } }
     ]);
-    expect(store.appendedModelCalls[0]).toMatchObject({
-      conversationId: 7,
-      previousResponseId: "resp_old",
-      responseId: "chatcmpl_1",
-      model: "test-model",
-      input: [{ type: "message", role: "user", content: "Current message" }],
-      outputText: "Hello"
-    });
   });
 
   it("projects stored function call items into chat completion messages", async () => {
@@ -88,17 +78,14 @@ describe("model clients", () => {
     });
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    await collect(client.stream({
-      conversationId: 8,
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Thanks" }]
-    }));
+    })));
 
     expect(requestBody?.messages).toEqual([
       { role: "user", content: "What is the weather?" },
@@ -134,14 +121,11 @@ describe("model clients", () => {
     });
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    await collect(client.stream({
-      conversationId: 10,
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [
         {
@@ -153,7 +137,7 @@ describe("model clients", () => {
         { type: "function_call_output", callId: "call_continue", output: "{\"temp\":22}" },
         { type: "message", role: "user", content: "Summarize that." }
       ]
-    }));
+    })));
 
     expect(requestBody?.messages).toEqual([
       {
@@ -171,38 +155,29 @@ describe("model clients", () => {
       { role: "tool", tool_call_id: "call_continue", content: "{\"temp\":22}" },
       { role: "user", content: "Summarize that." }
     ]);
-    expect(store.appendedModelCalls[0]?.input).toEqual([
-      {
-        type: "function_call",
-        callId: "call_continue",
-        name: "get_weather",
-        arguments: "{\"city\":\"Sydney\"}"
-      },
-      { type: "function_call_output", callId: "call_continue", output: "{\"temp\":22}" },
-      { type: "message", role: "user", content: "Summarize that." }
-    ]);
-    expect(store.appendedModelCalls[0]?.outputText).toBe("Continued");
   });
 
-  it("stores tool definitions on the completed model call", async () => {
+  it("projects tool definitions into chat completions requests", async () => {
     const store = createMemoryConversationStore({
       conversationId: 9,
       items: []
     });
-    const fetchImpl = vi.fn(async () => new Response(sse([
+    let requestBody: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+
+      return new Response(sse([
       { id: "chatcmpl_tools", choices: [{ delta: { content: "Done" } }] },
       "[DONE]"
-    ]), { status: 200 }));
+      ]), { status: 200 });
+    });
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    await collect(client.stream({
-      conversationId: 9,
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Use tool if needed" }],
       tools: [{
@@ -212,18 +187,20 @@ describe("model clients", () => {
         parameters: { type: "object", properties: {}, additionalProperties: false },
         strict: true
       }]
-    }));
+    })));
 
-    expect(store.appendedModelCalls[0]?.tools).toEqual([{
+    expect(requestBody?.tools).toEqual([{
       type: "function",
-      name: "get_weather",
-      description: "Gets weather",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
-      strict: true
+      function: {
+        name: "get_weather",
+        description: "Gets weather",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        strict: true
+      }
     }]);
   });
 
-  it("does not persist chat completions when the stream closes before done", async () => {
+  it("throws when the chat completions stream closes before done", async () => {
     const store = createMemoryConversationStore({
       conversationId: 22,
       items: []
@@ -233,27 +210,17 @@ describe("model clients", () => {
     ]), { status: 200 }));
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    const events = await collect(client.stream({
-      conversationId: 22,
+    await expect(collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Start" }]
-    }));
-
-    expect(events).toEqual([
-      { type: "response.created", id: "chatcmpl_partial" },
-      { type: "text.delta", delta: "Partial" },
-      { type: "error", message: "Chat completions stream closed before [DONE]" }
-    ]);
-    expect(store.appendedModelCalls).toEqual([]);
+    })))).rejects.toThrow("Chat completions stream closed before [DONE]");
   });
 
-  it("does not persist chat completions when a stream event is invalid JSON", async () => {
+  it("throws when a chat completions stream event is invalid JSON", async () => {
     const store = createMemoryConversationStore({
       conversationId: 23,
       items: []
@@ -261,25 +228,17 @@ describe("model clients", () => {
     const fetchImpl = vi.fn(async () => new Response(rawSse(["not-json"]), { status: 200 }));
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    const events = await collect(client.stream({
-      conversationId: 23,
+    await expect(collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Start" }]
-    }));
-
-    expect(events).toEqual([
-      { type: "error", message: "Failed to parse chat completions stream event" }
-    ]);
-    expect(store.appendedModelCalls).toEqual([]);
+    })))).rejects.toThrow("Failed to parse chat completions stream event");
   });
 
-  it("creates a conversation when streaming without a conversation id", async () => {
+  it("streams chat completions with a prepared new-conversation request", async () => {
     const store = createMemoryConversationStore({
       conversationId: 21,
       items: []
@@ -290,31 +249,20 @@ describe("model clients", () => {
     ]), { status: 200 }));
     const client = new ChatCompletionsClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai-compatible",
       baseUrl: "https://example.com/v1",
-      conversationStore: store,
       fetchImpl
     });
 
-    const events = await collect(client.stream({
+    const events = await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Start" }]
-    }));
+    })));
 
     expect(events).toEqual([
       { type: "response.created", id: "chatcmpl_new" },
       { type: "text.delta", delta: "Created" },
-      { type: "conversation.created", conversationId: 21 },
       { type: "response.completed", id: "chatcmpl_new", outputText: "Created", usage: undefined }
     ]);
-    expect(store.appendedModelCalls[0]).toMatchObject({
-      conversationId: undefined,
-      previousResponseId: undefined,
-      responseId: "chatcmpl_new",
-      model: "test-model",
-      input: [{ type: "message", role: "user", content: "Start" }],
-      outputText: "Created"
-    });
   });
 
   it("streams responses over websocket using previous_response_id", async () => {
@@ -330,17 +278,14 @@ describe("model clients", () => {
     ]);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory: () => socket as unknown as WebSocket
     });
 
-    const events = await collect(client.stream({
-      conversationId: 11,
+    const events = await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Continue" }]
-    }));
+    })));
     const sent = JSON.parse(socket.sent[0] ?? "{}");
 
     expect(sent).toMatchObject({
@@ -362,14 +307,6 @@ describe("model clients", () => {
       { type: "response.completed", id: "resp_next", outputText: "Done", usage: { output_tokens: 2 } }
     ]);
     expect(socket.closeCount).toBe(0);
-    expect(store.appendedModelCalls[0]).toMatchObject({
-      conversationId: 11,
-      previousResponseId: "resp_previous",
-      responseId: "resp_next",
-      model: "test-model",
-      input: [{ type: "message", role: "user", content: "Continue" }],
-      outputText: "Done"
-    });
   });
 
   it("reuses an open responses websocket for sequential turns", async () => {
@@ -393,22 +330,20 @@ describe("model clients", () => {
     const webSocketFactory = vi.fn(() => socket as unknown as WebSocket);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory
     });
 
-    await collect(client.stream({
-      conversationId: 16,
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "First turn" }]
-    }));
-    await collect(client.stream({
-      conversationId: 16,
+    })));
+    store.setPreviousResponseId("resp_first");
+
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Second turn" }]
-    }));
+    })));
 
     const firstSent = JSON.parse(socket.sent[0] ?? "{}");
     const secondSent = JSON.parse(socket.sent[1] ?? "{}");
@@ -435,14 +370,11 @@ describe("model clients", () => {
     ]);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory: () => socket as unknown as WebSocket
     });
 
-    await collect(client.stream({
-      conversationId: 12,
+    await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [
         {
@@ -454,7 +386,7 @@ describe("model clients", () => {
         },
         { type: "function_call_output", callId: "call_continue", output: "{\"temp\":22}" }
       ]
-    }));
+    })));
     const sent = JSON.parse(socket.sent[0] ?? "{}");
 
     expect(sent.input).toEqual([
@@ -467,17 +399,6 @@ describe("model clients", () => {
       },
       { type: "function_call_output", call_id: "call_continue", output: "{\"temp\":22}" }
     ]);
-    expect(store.appendedModelCalls[0]?.input).toEqual([
-      {
-        type: "function_call",
-        callId: "call_continue",
-        name: "get_weather",
-        arguments: "{\"city\":\"Sydney\"}",
-        providerItemId: "fc_1"
-      },
-      { type: "function_call_output", callId: "call_continue", output: "{\"temp\":22}" }
-    ]);
-    expect(store.appendedModelCalls[0]?.outputText).toBe("Tool result handled");
   });
 
   it("emits responses tool calls only after function call arguments are finalized", async () => {
@@ -511,17 +432,14 @@ describe("model clients", () => {
     ]);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory: () => socket as unknown as WebSocket
     });
 
-    const events = await collect(client.stream({
-      conversationId: 13,
+    const events = await collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "What is the weather?" }]
-    }));
+    })));
 
     expect(events).toEqual([
       { type: "response.created", id: "resp_tool" },
@@ -529,28 +447,22 @@ describe("model clients", () => {
         type: "tool_call",
         callId: "call_1",
         name: "get_weather",
-        arguments: "{\"city\":\"Sydney\"}"
+        arguments: "{\"city\":\"Sydney\"}",
+        providerItemId: "fc_1",
+        rawProviderItem: {
+          id: "fc_1",
+          type: "function_call",
+          call_id: "call_1",
+          name: "get_weather",
+          arguments: "{\"city\":\"Sydney\"}",
+          status: "in_progress"
+        }
       },
       { type: "response.completed", id: "resp_tool", outputText: undefined, usage: undefined }
     ]);
-    expect(store.appendedModelCalls[0]?.functionCalls).toEqual([{
-      type: "function_call",
-      callId: "call_1",
-      name: "get_weather",
-      arguments: "{\"city\":\"Sydney\"}",
-      providerItemId: "fc_1",
-      rawProviderItem: {
-        id: "fc_1",
-        type: "function_call",
-        call_id: "call_1",
-        name: "get_weather",
-        arguments: "{\"city\":\"Sydney\"}",
-        status: "in_progress"
-      }
-    }]);
   });
 
-  it("rejects store false for responses conversations", async () => {
+  it("throws on store false for responses conversations", async () => {
     const store = createMemoryConversationStore({
       conversationId: 14,
       previousResponseId: "resp_previous",
@@ -559,28 +471,21 @@ describe("model clients", () => {
     const webSocketFactory = vi.fn(() => new FakeWebSocket([]) as unknown as WebSocket);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory
     });
 
-    const events = await collect(client.stream({
-      conversationId: 14,
+    await expect(collect(client.stream(store.modelRequest({
       model: "test-model",
       store: false,
       input: [{ type: "message", role: "user", content: "Continue" }]
-    }));
-
-    expect(events).toEqual([{
-      type: "error",
-      message: "Responses conversations require store=true for resumable previous_response_id continuity"
-    }]);
+    })))).rejects.toThrow(
+      "Responses conversations require store=true for resumable previous_response_id continuity",
+    );
     expect(webSocketFactory).not.toHaveBeenCalled();
-    expect(store.appendedModelCalls).toEqual([]);
   });
 
-  it("normalizes responses websocket failures into error events", async () => {
+  it("throws responses websocket failures", async () => {
     const store = createMemoryConversationStore({
       conversationId: 15,
       previousResponseId: "resp_previous",
@@ -589,45 +494,204 @@ describe("model clients", () => {
     const socket = new ErroringWebSocket(new Error("socket failed"));
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
-      providerKey: "openai",
       baseUrl: "https://api.openai.com/v1",
-      conversationStore: store,
       webSocketFactory: () => socket as unknown as WebSocket
     });
 
-    const events = await collect(client.stream({
-      conversationId: 15,
+    await expect(collect(client.stream(store.modelRequest({
       model: "test-model",
       input: [{ type: "message", role: "user", content: "Continue" }]
-    }));
+    })))).rejects.toThrow("socket failed");
+    expect(socket.closeCount).toBe(1);
+  });
 
-    expect(events).toEqual([{ type: "error", message: "socket failed" }]);
-    expect(store.appendedModelCalls).toEqual([]);
+  it("maps responses websocket auth handshake failures to stream errors", async () => {
+    const store = createMemoryConversationStore({
+      conversationId: 17,
+      previousResponseId: "resp_previous",
+      items: []
+    });
+    const socket = new UnexpectedResponseWebSocket({
+      status: 401,
+      statusText: "Unauthorized",
+      body: {
+        error: {
+          code: "invalid_api_key",
+          message: "Incorrect API key provided"
+        }
+      }
+    });
+    const client = new ResponsesClient({
+      auth: { bearerToken: "bad-token" },
+      baseUrl: "https://api.openai.com/v1",
+      webSocketFactory: () => socket as unknown as WebSocket
+    });
+
+    await expect(collect(client.stream(store.modelRequest({
+      model: "test-model",
+      input: [{ type: "message", role: "user", content: "Continue" }]
+    })))).resolves.toEqual([
+      {
+        type: "error",
+        status: 401,
+        code: "invalid_api_key",
+        message: "Incorrect API key provided"
+      }
+    ]);
+    expect(socket.sent).toEqual([]);
     expect(socket.closeCount).toBe(1);
   });
 });
 
 function createMemoryConversationStore(initial: ConversationState) {
-  const state = { ...initial };
-  const appendedModelCalls: Array<Parameters<ConversationStore["appendModelCall"]>[0]> = [];
+  const state = { ...initial, items: [...initial.items] };
+  const appendedModelCalls: Array<Record<string, unknown>> = [];
+  const begunModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]> = [];
+  const completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]> = [];
+  const failedModelCalls: Array<Parameters<ConversationStore["failModelCall"]>[0]> = [];
+  const abortedModelCalls: Array<Parameters<ConversationStore["abortModelCall"]>[0]> = [];
+  const activeModelCalls = new Map<
+    number,
+    Parameters<ConversationStore["startModelCall"]>[0] & {
+      previousResponseId?: string;
+    }
+  >();
+  let nextModelCallId = 1;
 
   return {
+    modelRequest(input: Omit<
+      ModelCallRequest,
+      "conversationId" | "modelCallId" | "previousResponseId" | "historyItems"
+    >): ModelCallRequest {
+      return {
+        previousResponseId: state.previousResponseId,
+        historyItems: [...state.items],
+        ...input
+      };
+    },
+    setPreviousResponseId(responseId: string | undefined) {
+      state.previousResponseId = responseId;
+    },
     appendedModelCalls,
-    async getState(conversationId: number, _providerKey: string) {
+    begunModelCalls,
+    completedModelCalls,
+    failedModelCalls,
+    abortedModelCalls,
+    async getState(conversationId: number) {
       return { ...state, conversationId };
     },
-    async appendModelCall(input: Parameters<ConversationStore["appendModelCall"]>[0]) {
-      appendedModelCalls.push(input);
-      state.previousResponseId = input.responseId ?? input.previousResponseId;
-      state.conversationId = input.conversationId ?? state.conversationId;
-      return { ...state };
+    async startModelCall(input: Parameters<ConversationStore["startModelCall"]>[0]) {
+      const historyItems = [...state.items];
+      const modelCallId = nextModelCallId;
+      nextModelCallId += 1;
+
+      begunModelCalls.push(input);
+      activeModelCalls.set(modelCallId, {
+        ...input,
+        previousResponseId: state.previousResponseId
+      });
+      state.items.push(...input.input.map((item) => modelInputConversationItem(item, modelCallId)));
+
+      return {
+        conversationId: state.conversationId,
+        modelCallId,
+        requestContext: {
+          previousResponseId: state.previousResponseId,
+          historyItems,
+        },
+        lifecycle: {
+          createdConversation: false,
+          createdModelCall: true,
+        },
+      };
+    },
+    async completeModelCall(input: Parameters<ConversationStore["completeModelCall"]>[0]) {
+      completedModelCalls.push(input);
+      const started = activeModelCalls.get(input.modelCallId);
+      appendedModelCalls.push({
+        ...started,
+        ...input,
+        conversationId: input.conversationId,
+        previousResponseId: started?.previousResponseId,
+        model: started?.model,
+        tools: started?.tools,
+        input: started?.input,
+        functionCalls: input.functionCalls
+      });
+      state.previousResponseId = input.responseId ?? state.previousResponseId;
+      state.conversationId = input.conversationId;
+      return { ...state, items: [...state.items] };
+    },
+    async failModelCall(input: Parameters<ConversationStore["failModelCall"]>[0]) {
+      failedModelCalls.push(input);
+      state.conversationId = input.conversationId;
+      return { ...state, items: [...state.items] };
+    },
+    async abortModelCall(input: Parameters<ConversationStore["abortModelCall"]>[0]) {
+      abortedModelCalls.push(input);
+      state.conversationId = input.conversationId;
+      return { ...state, items: [...state.items] };
+    },
+    async abortRunningModelCalls() {
+      return 0;
     }
   } satisfies ConversationStore & {
-    appendedModelCalls: Array<Parameters<ConversationStore["appendModelCall"]>[0]>;
+    modelRequest(input: Omit<
+      ModelCallRequest,
+      "conversationId" | "modelCallId" | "previousResponseId" | "historyItems"
+    >): ModelCallRequest;
+    setPreviousResponseId(responseId: string | undefined): void;
+    appendedModelCalls: Array<Record<string, unknown>>;
+    begunModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]>;
+    completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]>;
+    failedModelCalls: Array<Parameters<ConversationStore["failModelCall"]>[0]>;
+    abortedModelCalls: Array<Parameters<ConversationStore["abortModelCall"]>[0]>;
   };
 }
 
 let nextConversationItemId = 1;
+
+function modelInputConversationItem(
+  input: Parameters<ConversationStore["startModelCall"]>[0]["input"][number],
+  modelCallId: number,
+) {
+  if (input.type === "function_call_output") {
+    return conversationItem({
+      kind: "function_call_output",
+      toolCallId: input.callId,
+      toolOutput: input.output,
+      modelCallId
+    });
+  }
+
+  if (input.type === "function_call") {
+    return conversationItem({
+      kind: "function_call",
+      toolCallId: input.callId,
+      toolName: input.name,
+      toolArguments: input.arguments,
+      providerItemId: input.providerItemId,
+      rawProviderItem: input.rawProviderItem,
+      modelCallId
+    });
+  }
+
+  if (input.type === "reasoning") {
+    return conversationItem({
+      kind: "reasoning",
+      providerItemId: input.providerItemId,
+      rawProviderItem: input.rawProviderItem,
+      modelCallId
+    });
+  }
+
+  return conversationItem({
+    kind: "message",
+    role: input.role,
+    content: input.content,
+    modelCallId
+  });
+}
 
 function conversationItem(input: {
   kind: ConversationItem["kind"];
@@ -639,7 +703,6 @@ function conversationItem(input: {
   toolArguments?: string;
   toolOutput?: string;
   providerItemId?: string;
-  providerResponseId?: string;
   rawProviderItem?: Record<string, unknown>;
 }): ConversationItem {
   const id = nextConversationItemId;
@@ -657,7 +720,6 @@ function conversationItem(input: {
     toolName: input.toolName ?? null,
     toolArguments: input.toolArguments ?? null,
     toolOutput: input.toolOutput ?? null,
-    providerResponseId: input.providerResponseId ?? null,
     providerItemId: input.providerItemId ?? null,
     rawProviderItem: input.rawProviderItem ?? null,
     createdAt: new Date(0)
@@ -723,6 +785,47 @@ class ErroringWebSocket extends EventEmitter {
   send(data: string) {
     this.sent.push(data);
     setTimeout(() => this.emit("error", this.error), 0);
+  }
+
+  close() {
+    if (this.readyState === 3) {
+      return;
+    }
+
+    this.closeCount += 1;
+    this.readyState = 3;
+    this.emit("close");
+  }
+}
+
+class UnexpectedResponseWebSocket extends EventEmitter {
+  readonly sent: string[] = [];
+  closeCount = 0;
+  readyState = 0;
+
+  constructor(private readonly response: {
+    status: number;
+    statusText: string;
+    body: Record<string, unknown>;
+  }) {
+    super();
+    setTimeout(() => {
+      if (this.readyState !== 0) {
+        return;
+      }
+
+      const body = Readable.from([JSON.stringify(this.response.body)]) as Readable & {
+        statusCode?: number;
+        statusMessage?: string;
+      };
+      body.statusCode = this.response.status;
+      body.statusMessage = this.response.statusText;
+      this.emit("unexpected-response", {}, body);
+    }, 0);
+  }
+
+  send(data: string) {
+    this.sent.push(data);
   }
 
   close() {

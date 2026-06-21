@@ -1,16 +1,9 @@
 import {
-  completeConversationTurn,
-  getConversationState,
   isRecord,
   normalizeBaseUrl,
   parseJsonRecord,
   providerHeaders,
 } from "@/modelClients/clientUtils";
-import {
-  createDrizzleConversationStore,
-  type ConversationState,
-  type ConversationStore,
-} from "@/modelClients/conversationStore";
 import { toChatCompletionsBody } from "@/modelClients/requestMapping";
 import type {
   ModelCallRequest,
@@ -21,114 +14,108 @@ import type {
 
 export type ChatCompletionsClientOptions = {
   auth: ProviderAuth;
-  providerKey: string;
   baseUrl: string;
-  conversationStore?: ConversationStore;
   fetchImpl?: typeof fetch;
 };
 
 export class ChatCompletionsClient implements ModelClient {
-  private readonly conversationStore: ConversationStore;
-  private readonly conversationState = new Map<number, ConversationState>();
-
-  constructor(private readonly options: ChatCompletionsClientOptions) {
-    this.conversationStore =
-      options.conversationStore ?? createDrizzleConversationStore();
-  }
+  constructor(private readonly options: ChatCompletionsClientOptions) {}
 
   async *stream(request: ModelCallRequest): AsyncIterable<ModelStreamEvent> {
-    const conversationState = await getConversationState(
-      this.conversationState,
-      this.conversationStore,
-      request,
-      this.options.providerKey,
-    );
-    const body = toChatCompletionsBody(request, conversationState?.items);
+    const body = toChatCompletionsBody(request, request.historyItems);
 
     const fetchImpl = this.options.fetchImpl ?? fetch;
-    const response = await fetchImpl(
-      new URL("chat/completions", normalizeBaseUrl(this.options.baseUrl)),
-      {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: request.signal,
-      },
-    );
+    let responseId: string | undefined;
+    let response: Response;
+
+    try {
+      response = await fetchImpl(
+        new URL("chat/completions", normalizeBaseUrl(this.options.baseUrl)),
+        {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: request.signal,
+        },
+      );
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : "Chat completions stream failed",
+      );
+    }
 
     if (!response.ok) {
-      yield await toHttpErrorEvent(response);
+      const errorEvent = await toHttpErrorEvent(response);
+
+      if (!errorEvent) {
+        throw new Error(response.statusText || "Chat completions request failed");
+      }
+
+      yield errorEvent;
       return;
     }
 
     if (!response.body) {
-      yield {
-        type: "error",
-        message: "Chat completions response did not include a stream body",
-      };
-      return;
+      throw new Error("Chat completions response did not include a stream body");
     }
 
-    let responseId: string | undefined;
     let outputText = "";
     let usage: unknown;
     let createdEmitted = false;
     let sawDone = false;
     const toolCalls = new Map<number, PendingChatToolCall>();
 
-    for await (const data of readServerSentEvents(response.body)) {
-      if (data === "[DONE]") {
-        sawDone = true;
-        break;
-      }
+    try {
+      for await (const data of readServerSentEvents(response.body)) {
+        if (data === "[DONE]") {
+          sawDone = true;
+          break;
+        }
 
-      const chunk = parseJsonRecord(data);
+        const chunk = parseJsonRecord(data);
 
-      if (!chunk) {
-        yield {
-          type: "error",
-          message: "Failed to parse chat completions stream event",
-        };
-        return;
-      }
+        if (!chunk) {
+          throw new Error("Failed to parse chat completions stream event");
+        }
 
-      if (isErrorChunk(chunk)) {
-        yield toErrorEvent(chunk.error);
-        return;
-      }
+        if (isErrorChunk(chunk)) {
+          yield toErrorEvent(chunk.error);
+          return;
+        }
 
-      if (!createdEmitted && typeof chunk.id === "string") {
-        responseId = chunk.id;
-        createdEmitted = true;
-        yield { type: "response.created", id: responseId };
-      }
+        if (!createdEmitted && typeof chunk.id === "string") {
+          responseId = chunk.id;
+          createdEmitted = true;
+          yield { type: "response.created", id: responseId };
+        }
 
-      usage = chunk.usage ?? usage;
+        usage = chunk.usage ?? usage;
 
-      const choice = Array.isArray(chunk.choices)
-        ? chunk.choices[0]
-        : undefined;
-      const delta = isRecord(choice?.delta) ? choice.delta : undefined;
-      const content = delta?.content;
+        const choice = Array.isArray(chunk.choices)
+          ? chunk.choices[0]
+          : undefined;
+        const delta = isRecord(choice?.delta) ? choice.delta : undefined;
+        const content = delta?.content;
 
-      if (typeof content === "string" && content.length > 0) {
-        outputText += content;
-        yield { type: "text.delta", delta: content };
-      }
+        if (typeof content === "string" && content.length > 0) {
+          outputText += content;
+          yield { type: "text.delta", delta: content };
+        }
 
-      if (Array.isArray(delta?.tool_calls)) {
-        for (const toolCallDelta of delta.tool_calls) {
-          mergeChatToolCallDelta(toolCalls, toolCallDelta);
+        if (Array.isArray(delta?.tool_calls)) {
+          for (const toolCallDelta of delta.tool_calls) {
+            mergeChatToolCallDelta(toolCalls, toolCallDelta);
+          }
         }
       }
+    } catch (error) {
+      throw new Error(
+        error instanceof Error ? error.message : "Chat completions stream failed",
+      );
     }
 
     if (!sawDone) {
-      yield {
-        type: "error",
-        message: "Chat completions stream closed before [DONE]",
-      };
-      return;
+      throw new Error("Chat completions stream closed before [DONE]");
     }
 
     const completedToolCalls = [...toolCalls.values()].flatMap((toolCall) => {
@@ -156,27 +143,6 @@ export class ChatCompletionsClient implements ModelClient {
         callId: toolCall.callId,
         name: toolCall.name,
         arguments: toolCall.arguments,
-      };
-    }
-
-    const updatedConversationState = await completeConversationTurn(
-      this.conversationState,
-      this.conversationStore,
-      this.options.providerKey,
-      {
-        conversationId: conversationState?.conversationId,
-        request,
-        responseId,
-        outputText,
-        toolCalls: completedToolCalls,
-        usage,
-      },
-    );
-
-    if (request.conversationId === undefined) {
-      yield {
-        type: "conversation.created",
-        conversationId: updatedConversationState.conversationId,
       };
     }
 
@@ -230,16 +196,23 @@ async function* readServerSentEvents(stream: ReadableStream<Uint8Array>) {
   }
 }
 
-async function toHttpErrorEvent(response: Response): Promise<ModelStreamEvent> {
+async function toHttpErrorEvent(
+  response: Response,
+): Promise<ModelStreamEvent | undefined> {
   const body = parseJsonRecord(await response.text());
   const error = isRecord(body?.error) ? body.error : body;
+  const message =
+    typeof error?.message === "string" ? error.message : undefined;
+
+  if (!message && typeof error?.code !== "string") {
+    return undefined;
+  }
 
   return {
     type: "error",
     status: response.status,
     code: typeof error?.code === "string" ? error.code : undefined,
-    message:
-      typeof error?.message === "string" ? error.message : response.statusText,
+    message: message ?? response.statusText,
   };
 }
 

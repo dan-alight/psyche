@@ -54,8 +54,6 @@ export const oauthConfig = sqliteTable("oauth_config", {
 
 export const conversation = sqliteTable("conversation", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  providerKey: text("provider_key").notNull(),
-  previousResponseId: text("previous_response_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull()
 });
@@ -67,9 +65,12 @@ export const conversationModelCall = sqliteTable("conversation_model_call", {
     .references(() => conversation.id, { onDelete: "cascade" }),
   providerKey: text("provider_key").notNull(),
   model: text("model").notNull(),
+  transport: text("transport", { enum: ["responses", "chat_completions"] })
+    .notNull()
+    .default("chat_completions"),
   previousResponseId: text("previous_response_id"),
   responseId: text("response_id"),
-  status: text("status", { enum: ["completed", "failed"] }).notNull(),
+  status: text("status", { enum: ["running", "completed", "failed", "aborted"] }).notNull(),
   usage: text("usage", { mode: "json" }).$type<unknown>(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   completedAt: integer("completed_at", { mode: "timestamp" })
@@ -77,16 +78,30 @@ export const conversationModelCall = sqliteTable("conversation_model_call", {
   index("conversation_model_call_conversation_idx").on(table.conversationId)
 ]);
 
-export const conversationModelCallTool = sqliteTable("conversation_model_call_tool", {
+export const toolDefinition = sqliteTable("tool_definition", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  definitionKey: text("definition_key").notNull(),
+  definitionJson: text("definition_json", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull()
+}, (table) => [
+  uniqueIndex("tool_definition_key_idx").on(table.definitionKey),
+  index("tool_definition_name_idx").on(table.name)
+]);
+
+export const conversationModelCallToolUsage = sqliteTable("conversation_model_call_tool_usage", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   modelCallId: integer("model_call_id")
     .notNull()
     .references(() => conversationModelCall.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  definitionJson: text("definition_json", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  toolDefinitionId: integer("tool_definition_id")
+    .notNull()
+    .references(() => toolDefinition.id, { onDelete: "restrict" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull()
 }, (table) => [
-  index("conversation_model_call_tool_call_idx").on(table.modelCallId)
+  index("conversation_model_call_tool_usage_call_idx").on(table.modelCallId),
+  index("conversation_model_call_tool_usage_definition_idx").on(table.toolDefinitionId),
+  uniqueIndex("conversation_model_call_tool_usage_unique_idx").on(table.modelCallId, table.toolDefinitionId)
 ]);
 
 export const conversationItem = sqliteTable("conversation_item", {
@@ -104,7 +119,6 @@ export const conversationItem = sqliteTable("conversation_item", {
   toolName: text("tool_name"),
   toolArguments: text("tool_arguments"),
   toolOutput: text("tool_output"),
-  providerResponseId: text("provider_response_id"),
   providerItemId: text("provider_item_id"),
   rawProviderItem: text("raw_provider_item", { mode: "json" }).$type<Record<string, unknown>>(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull()
@@ -113,9 +127,33 @@ export const conversationItem = sqliteTable("conversation_item", {
   uniqueIndex("conversation_item_conversation_sequence_idx").on(table.conversationId, table.sequence)
 ]);
 
+export const conversationTranscriptItem = sqliteTable("conversation_transcript_item", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversationId: integer("conversation_id")
+    .notNull()
+    .references(() => conversation.id, { onDelete: "cascade" }),
+  modelCallId: integer("model_call_id")
+    .references(() => conversationModelCall.id, { onDelete: "set null" }),
+  sequence: integer("sequence").notNull(),
+  kind: text("kind", { enum: ["user_prompt", "function_call", "assistant_output"] }).notNull(),
+  content: text("content"),
+  toolCallId: text("tool_call_id"),
+  toolName: text("tool_name"),
+  toolArguments: text("tool_arguments"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull()
+}, (table) => [
+  index("conversation_transcript_item_conversation_idx").on(table.conversationId),
+  index("conversation_transcript_item_model_call_idx").on(table.modelCallId),
+  uniqueIndex("conversation_transcript_item_conversation_sequence_idx").on(table.conversationId, table.sequence)
+]);
+
 export type Conversation = typeof conversation.$inferSelect;
 export type ConversationInsert = typeof conversation.$inferInsert;
 export type ConversationItem = typeof conversationItem.$inferSelect;
 export type ConversationItemInsert = typeof conversationItem.$inferInsert;
+export type ConversationModelCall = typeof conversationModelCall.$inferSelect;
 export type ConversationModelCallInsert = typeof conversationModelCall.$inferInsert;
-export type ConversationModelCallToolInsert = typeof conversationModelCallTool.$inferInsert;
+export type ConversationModelCallToolUsageInsert = typeof conversationModelCallToolUsage.$inferInsert;
+export type ConversationTranscriptItem = typeof conversationTranscriptItem.$inferSelect;
+export type ConversationTranscriptItemInsert = typeof conversationTranscriptItem.$inferInsert;
+export type ToolDefinitionInsert = typeof toolDefinition.$inferInsert;

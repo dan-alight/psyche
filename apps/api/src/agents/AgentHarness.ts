@@ -1,6 +1,7 @@
 import {
   createDrizzleConversationStore,
   type ConversationStore,
+  type StartedModelCall,
 } from "@/modelClients/conversationStore";
 import {
   resolveActiveProviderAuth,
@@ -9,12 +10,17 @@ import {
 import type {
   ModelCallRequest,
   ModelClient,
+  ModelFunctionCallInput,
+  ModelInput,
   ModelStreamEvent,
   ProviderAuth,
 } from "@/modelClients/types";
 import type { ProviderAccessStore, ProviderRecord } from "@/providerStore";
-import { createTurnModelClient } from "@/agents/selectModelClient";
-import type { AgentRunEvent, AgentRunInput } from "@/agents/types";
+import {
+  createTurnModelClient,
+  selectModelClientTransport,
+} from "@/agents/selectModelClient";
+import type { AgentRunInput } from "@/agents/types";
 
 export type AgentHarnessOptions = {
   store: ProviderAccessStore;
@@ -24,33 +30,57 @@ export type AgentHarnessOptions = {
   createModelClient?: (input: {
     provider: ProviderRecord;
     auth: ProviderAuth;
-    conversationStore: ConversationStore;
   }) => ModelClient;
 };
 
-type StreamTurnResult = {
-  needsFreshCredentials: boolean;
-  failed?: Extract<ModelStreamEvent, { type: "error" }>;
-  conversationId?: number;
+type CapturedModelOutput = {
   responseId?: string;
+  outputText?: string;
+  functionCalls: ModelFunctionCallInput[];
+  usage?: unknown;
+};
+
+type ModelStreamAttemptResult =
+  | {
+      status: "needs_fresh_credentials";
+      output: CapturedModelOutput;
+    }
+  | {
+      status: "failed";
+      output: CapturedModelOutput;
+      error: Extract<ModelStreamEvent, { type: "error" }>;
+    }
+  | {
+      status: "incomplete";
+      output: CapturedModelOutput;
+    }
+  | {
+      status: "completed";
+      output: CapturedModelOutput;
+    };
+
+type CapturedModelOutputUpdate = {
+  completed?: boolean;
+  failure?: Extract<ModelStreamEvent, { type: "error" }>;
 };
 
 export class AgentHarness {
   constructor(private readonly options: AgentHarnessOptions) {}
 
-  async *run(input: AgentRunInput): AsyncIterable<AgentRunEvent> {
-    yield {
-      type: "run.started",
-      providerKey: input.providerKey,
-      model: input.model,
-      conversationId: input.conversationId,
+  async run(input: AgentRunInput): Promise<void> {
+    let startedModelCall: StartedModelCall | undefined;
+    let streamResult: ModelStreamAttemptResult = {
+      status: "incomplete",
+      output: emptyCapturedModelOutput(),
     };
+    const modelStreamEvents: ModelStreamEvent[] = [];
+
+    const conversationStore =
+      this.options.conversationStore ?? createDrizzleConversationStore();
+    const modelInput = toUserPromptModelInput(input.input);
+    let modelCallFinished = false;
 
     try {
-      if (input.maxTurns !== undefined && input.maxTurns < 1) {
-        throw new Error("maxTurns must be at least 1");
-      }
-
       const provider = await this.options.store.getProviderByKey(
         input.providerKey,
       );
@@ -59,78 +89,98 @@ export class AgentHarness {
         throw new Error(`Provider '${input.providerKey}' is not configured`);
       }
 
-      const conversationStore =
-        this.options.conversationStore ?? createDrizzleConversationStore();
-      const request = toModelCallRequest(input);
-      const firstClient = await this.createClient(
-        provider,
-        conversationStore,
-        false,
-      );
-      let result: StreamTurnResult = { needsFreshCredentials: false };
+      const transport = selectModelClientTransport(provider);
+
+      startedModelCall = await conversationStore.startModelCall({
+        providerKey: input.providerKey,
+        model: input.model,
+        transport,
+        input: modelInput,
+        transcriptUserPrompt: input.input,
+      });
+      const request = toModelCallRequest(input, startedModelCall, modelInput);
+
+      const firstClient = await this.createClient(provider, false);
 
       try {
-        result = yield* streamTurnUntilCredentialRefreshNeeded(
+        streamResult = await streamModelAttempt(
           firstClient,
           request,
+          modelStreamEvents,
         );
       } finally {
         firstClient.close?.();
       }
 
-      if (result.needsFreshCredentials) {
-        const refreshedClient = await this.createClient(
-          provider,
-          conversationStore,
-          true,
-        );
+      if (streamResult.status === "needs_fresh_credentials") {
+        const refreshedClient = await this.createClient(provider, true);
 
         try {
-          result = yield* streamTurnUntilCredentialRefreshNeeded(
+          streamResult = await streamModelAttempt(
             refreshedClient,
             request,
+            modelStreamEvents,
           );
         } finally {
           refreshedClient.close?.();
         }
       }
 
-      if (result.needsFreshCredentials) {
-        yield {
-          type: "run.failed",
-          message: "Model authentication failed after refreshing credentials",
-        };
-        return;
+      if (streamResult.status === "needs_fresh_credentials") {
+        await failModelCall(
+          conversationStore,
+          startedModelCall,
+          streamResult.output,
+        );
+        modelCallFinished = true;
+        throw new Error(
+          "Model authentication failed after refreshing credentials",
+        );
       }
 
-      if (result.failed) {
-        yield {
-          type: "run.failed",
-          status: result.failed.status,
-          code: result.failed.code,
-          message: result.failed.message,
-        };
-        return;
+      if (streamResult.status === "failed") {
+        await failModelCall(
+          conversationStore,
+          startedModelCall,
+          streamResult.output,
+        );
+        modelCallFinished = true;
+        throw modelStreamError(streamResult.error);
       }
 
-      yield {
-        type: "run.completed",
-        conversationId: result.conversationId ?? input.conversationId,
-        responseId: result.responseId,
-      };
+      if (streamResult.status === "incomplete") {
+        await failModelCall(
+          conversationStore,
+          startedModelCall,
+          streamResult.output,
+        );
+        modelCallFinished = true;
+        throw new Error("Model stream ended before response completed");
+      }
+
+      await conversationStore.completeModelCall({
+        conversationId: startedModelCall.conversationId,
+        modelCallId: startedModelCall.modelCallId,
+        responseId: streamResult.output.responseId,
+        outputText: streamResult.output.outputText,
+        functionCalls: streamResult.output.functionCalls,
+        usage: streamResult.output.usage,
+      });
+      modelCallFinished = true;
     } catch (error) {
-      yield {
-        type: "run.failed",
-        message: error instanceof Error ? error.message : "Agent run failed",
-      };
+      if (startedModelCall && !modelCallFinished) {
+        await tryFailModelCall(
+          conversationStore,
+          startedModelCall,
+          streamResult.output,
+        );
+      }
+
+      throw error;
     }
   }
 
-  private async createClient(
-    provider: ProviderRecord,
-    conversationStore: ConversationStore,
-    forceRefresh: boolean,
-  ) {
+  private async createClient(provider: ProviderRecord, forceRefresh: boolean) {
     const auth = await resolveActiveProviderAuth({
       store: this.options.store,
       providerKey: provider.key,
@@ -142,27 +192,40 @@ export class AgentHarness {
     return (this.options.createModelClient ?? createTurnModelClient)({
       provider,
       auth,
-      conversationStore,
     });
   }
 }
 
-function toModelCallRequest(input: AgentRunInput): ModelCallRequest {
+function toModelCallRequest(
+  input: AgentRunInput,
+  startedModelCall: StartedModelCall,
+  modelInput: ModelInput[],
+): ModelCallRequest {
   return {
-    conversationId: input.conversationId,
+    previousResponseId: startedModelCall.requestContext.previousResponseId,
+    historyItems: startedModelCall.requestContext.historyItems,
     model: input.model,
-    instructions: input.instructions,
-    input: input.input,
-    tools: input.tools,
-    store: input.store,
-    temperature: input.temperature,
-    maxOutputTokens: input.maxOutputTokens,
-    responseFormat: input.responseFormat,
-    reasoning: input.reasoning,
-    verbosity: input.verbosity,
-    metadata: input.metadata,
-    signal: input.signal,
+    input: modelInput,
   };
+}
+
+function toUserPromptModelInput(input: string): ModelInput[] {
+  return [
+    {
+      type: "message",
+      role: "user",
+      content: input,
+    },
+  ];
+}
+
+function modelStreamError(event: Extract<ModelStreamEvent, { type: "error" }>) {
+  const error = new Error(event.message);
+
+  return Object.assign(error, {
+    status: event.status,
+    code: event.code,
+  });
 }
 
 function isAuthFailure(event: ModelStreamEvent) {
@@ -182,57 +245,114 @@ function isModelWork(event: ModelStreamEvent) {
   );
 }
 
-async function* streamTurnUntilCredentialRefreshNeeded(
+function emptyCapturedModelOutput(): CapturedModelOutput {
+  return {
+    functionCalls: [],
+  };
+}
+
+async function failModelCall(
+  conversationStore: ConversationStore,
+  startedModelCall: StartedModelCall,
+  output: CapturedModelOutput,
+) {
+  await conversationStore.failModelCall({
+    conversationId: startedModelCall.conversationId,
+    modelCallId: startedModelCall.modelCallId,
+    responseId: output.responseId,
+  });
+}
+
+async function tryFailModelCall(
+  conversationStore: ConversationStore,
+  startedModelCall: StartedModelCall,
+  output: CapturedModelOutput,
+) {
+  try {
+    await failModelCall(conversationStore, startedModelCall, output);
+  } catch {
+    // Preserve the model/client failure that led to this cleanup path.
+  }
+}
+
+async function streamModelAttempt(
   client: ModelClient,
   request: ModelCallRequest,
-): AsyncGenerator<ModelStreamEvent, StreamTurnResult, void> {
+  events: ModelStreamEvent[],
+): Promise<ModelStreamAttemptResult> {
   let emittedModelWork = false;
   const pendingEvents: ModelStreamEvent[] = [];
-  const result: StreamTurnResult = {
-    needsFreshCredentials: false,
-  };
+  const output = emptyCapturedModelOutput();
+  let completed = false;
+  let failure: Extract<ModelStreamEvent, { type: "error" }> | undefined;
 
   for await (const event of client.stream(request)) {
+    const update = captureModelOutput(output, event);
+    completed = update.completed || completed;
+    failure = update.failure ?? failure;
+
     if (isAuthFailure(event) && !emittedModelWork) {
       return {
-        ...result,
-        needsFreshCredentials: true,
+        status: "needs_fresh_credentials",
+        output,
       };
     }
 
-    updateResult(result, event);
-
     if (isModelWork(event)) {
       emittedModelWork = true;
-      yield* pendingEvents.splice(0);
+      events.push(...pendingEvents.splice(0));
     }
 
     if (emittedModelWork) {
-      yield event;
+      events.push(event);
     } else {
       pendingEvents.push(event);
     }
   }
 
-  yield* pendingEvents;
-  return result;
-}
-
-function updateResult(result: StreamTurnResult, event: ModelStreamEvent) {
-  if (event.type === "conversation.created") {
-    result.conversationId = event.conversationId;
-    return;
+  events.push(...pendingEvents);
+  if (failure) {
+    return { status: "failed", output, error: failure };
   }
 
-  if (
-    event.type === "response.created" ||
-    event.type === "response.completed"
-  ) {
-    result.responseId = event.id ?? result.responseId;
-    return;
+  if (completed) {
+    return { status: "completed", output };
+  }
+
+  return { status: "incomplete", output };
+}
+
+function captureModelOutput(
+  output: CapturedModelOutput,
+  event: ModelStreamEvent,
+): CapturedModelOutputUpdate {
+  if (event.type === "tool_call") {
+    output.functionCalls.push({
+      type: "function_call",
+      callId: event.callId,
+      name: event.name,
+      arguments: event.arguments,
+      providerItemId: event.providerItemId,
+      rawProviderItem: event.rawProviderItem,
+    });
+    return {};
+  }
+
+  if (event.type === "response.created") {
+    output.responseId = event.id ?? output.responseId;
+    return {};
+  }
+
+  if (event.type === "response.completed") {
+    output.responseId = event.id ?? output.responseId;
+    output.outputText = event.outputText;
+    output.usage = event.usage;
+    return { completed: true };
   }
 
   if (event.type === "error") {
-    result.failed = event;
+    return { failure: event };
   }
+
+  return {};
 }

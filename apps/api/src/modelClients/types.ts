@@ -1,8 +1,12 @@
+import type { ConversationItem } from "@/db/schema";
+
 export type ProviderAuth = {
   bearerToken: string;
   organization?: string;
   project?: string;
 };
+
+export type ModelClientTransport = "responses" | "chat_completions";
 
 export type ModelMessageInput = {
   type: "message";
@@ -55,7 +59,8 @@ export type ModelResponseFormat =
     };
 
 export type ModelCallRequest = {
-  conversationId?: number;
+  previousResponseId?: string;
+  historyItems: ConversationItem[];
   model: string;
   instructions?: string;
   input: ModelInput[];
@@ -73,10 +78,16 @@ export type ModelCallRequest = {
 };
 
 export type ModelStreamEvent =
-  | { type: "conversation.created"; conversationId: number }
   | { type: "response.created"; id: string }
   | { type: "text.delta"; delta: string }
-  | { type: "tool_call"; callId: string; name: string; arguments: string }
+  | {
+      type: "tool_call";
+      callId: string;
+      name: string;
+      arguments: string;
+      providerItemId?: string;
+      rawProviderItem?: Record<string, unknown>;
+    }
   | { type: "response.completed"; id?: string; outputText?: string; usage?: unknown }
   | { type: "error"; status?: number; code?: string; message: string };
 

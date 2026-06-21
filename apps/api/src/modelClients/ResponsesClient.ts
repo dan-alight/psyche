@@ -1,18 +1,13 @@
+import type { ClientRequest, IncomingMessage } from "node:http";
+
 import WebSocket from "ws";
 
 import {
-  completeConversationTurn,
-  getConversationState,
   isRecord,
   normalizeBaseUrl,
   parseJsonRecord,
   providerHeaders,
 } from "@/modelClients/clientUtils";
-import {
-  createDrizzleConversationStore,
-  type ConversationState,
-  type ConversationStore,
-} from "@/modelClients/conversationStore";
 import { toResponsesCreateEvent } from "@/modelClients/requestMapping";
 import type {
   ModelCallRequest,
@@ -23,9 +18,7 @@ import type {
 
 export type ResponsesClientOptions = {
   auth: ProviderAuth;
-  providerKey: string;
   baseUrl: string;
-  conversationStore?: ConversationStore;
   webSocketFactory?: (
     url: URL,
     options: { headers: Record<string, string> },
@@ -33,32 +26,20 @@ export type ResponsesClientOptions = {
 };
 
 export class ResponsesClient implements ModelClient {
-  private readonly conversationStore: ConversationStore;
-  private readonly conversationState = new Map<number, ConversationState>();
   private socket?: WebSocket;
   private inFlight = false;
 
-  constructor(private readonly options: ResponsesClientOptions) {
-    this.conversationStore =
-      options.conversationStore ?? createDrizzleConversationStore();
-  }
+  constructor(private readonly options: ResponsesClientOptions) {}
 
   async *stream(request: ModelCallRequest): AsyncIterable<ModelStreamEvent> {
     if (request.store === false) {
-      yield {
-        type: "error",
-        message:
-          "Responses conversations require store=true for resumable previous_response_id continuity",
-      };
-      return;
+      throw new Error(
+        "Responses conversations require store=true for resumable previous_response_id continuity",
+      );
     }
 
     if (this.inFlight) {
-      yield {
-        type: "error",
-        message: "Responses websocket already has an in-flight response",
-      };
-      return;
+      throw new Error("Responses websocket already has an in-flight response");
     }
 
     this.inFlight = true;
@@ -69,16 +50,24 @@ export class ResponsesClient implements ModelClient {
     const toolCalls = new Map<string, PendingResponsesToolCall>();
 
     try {
-      const conversationState = await getConversationState(
-        this.conversationState,
-        this.conversationStore,
-        request,
-        this.options.providerKey,
-      );
-      const socket = await this.ensureSocket(request.signal);
+      let socket: WebSocket;
+
+      try {
+        socket = await this.ensureSocket(request.signal);
+      } catch (error) {
+        const errorEvent = toWebSocketOpenErrorEvent(error);
+
+        if (errorEvent) {
+          yield errorEvent;
+          return;
+        }
+
+        throw error;
+      }
+
       const responseCreateEvent = {
         ...toResponsesCreateEvent(request, {
-          previousResponseId: conversationState?.previousResponseId,
+          previousResponseId: request.previousResponseId,
         }),
         store: request.store ?? true,
       };
@@ -89,7 +78,7 @@ export class ResponsesClient implements ModelClient {
         const event = parseJsonRecord(rawEvent);
 
         if (!event) {
-          continue;
+          throw new Error("Failed to parse responses websocket stream event");
         }
 
         for (const streamEvent of toModelStreamEvents(event, toolCalls)) {
@@ -114,26 +103,6 @@ export class ResponsesClient implements ModelClient {
               usage,
             };
 
-            const updatedConversationState = await completeConversationTurn(
-              this.conversationState,
-              this.conversationStore,
-              this.options.providerKey,
-              {
-                conversationId: conversationState?.conversationId,
-                request,
-                responseId,
-                outputText,
-                toolCalls: completedToolCalls(toolCalls),
-                usage,
-              },
-            );
-
-            if (request.conversationId === undefined) {
-              yield {
-                type: "conversation.created",
-                conversationId: updatedConversationState.conversationId,
-              };
-            }
           }
 
           yield eventToYield;
@@ -150,19 +119,12 @@ export class ResponsesClient implements ModelClient {
       }
 
       this.close();
-      yield {
-        type: "error",
-        message: "Responses websocket closed before response completed",
-      };
+      throw new Error("Responses websocket closed before response completed");
     } catch (error) {
       this.close();
-      yield {
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Responses websocket stream failed",
-      };
+      throw error instanceof Error
+        ? error
+        : new Error("Responses websocket stream failed");
     } finally {
       this.inFlight = false;
     }
@@ -236,6 +198,7 @@ function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
     const cleanup = () => {
       socket.off("open", onOpen);
       socket.off("error", onError);
+      socket.off("unexpected-response", onUnexpectedResponse);
       socket.off("close", onClose);
       signal?.removeEventListener("abort", onAbort);
     };
@@ -246,6 +209,27 @@ function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
     const onError = (error: Error) => {
       cleanup();
       reject(error);
+    };
+    const onUnexpectedResponse = async (
+      _request: ClientRequest,
+      response: IncomingMessage,
+    ) => {
+      cleanup();
+
+      try {
+        reject(
+          toWebSocketUnexpectedResponseError(
+            response,
+            await readIncomingMessage(response),
+          ),
+        );
+      } catch (error) {
+        reject(
+          error instanceof Error
+            ? error
+            : new Error("Responses websocket upgrade failed"),
+        );
+      }
     };
     const onClose = () => {
       cleanup();
@@ -259,6 +243,7 @@ function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
 
     socket.once("open", onOpen);
     socket.once("error", onError);
+    socket.once("unexpected-response", onUnexpectedResponse);
     socket.once("close", onClose);
     signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -266,6 +251,60 @@ function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
       onOpen();
     }
   });
+}
+
+async function readIncomingMessage(response: IncomingMessage) {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of response) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function toWebSocketUnexpectedResponseError(
+  response: IncomingMessage,
+  body: string,
+) {
+  const parsed = parseJsonRecord(body);
+  const error = isRecord(parsed?.error) ? parsed.error : parsed;
+  const message =
+    typeof error?.message === "string"
+      ? error.message
+      : response.statusMessage || "Responses websocket upgrade failed";
+
+  return Object.assign(new Error(message), {
+    status: response.statusCode,
+    code: typeof error?.code === "string" ? error.code : undefined,
+  });
+}
+
+function toWebSocketOpenErrorEvent(error: unknown): ModelStreamEvent | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  const status =
+    typeof error.status === "number"
+      ? error.status
+      : typeof error.statusCode === "number"
+        ? error.statusCode
+        : undefined;
+
+  if (status === undefined) {
+    return undefined;
+  }
+
+  return {
+    type: "error",
+    status,
+    code: typeof error.code === "string" ? error.code : undefined,
+    message:
+      error instanceof Error
+        ? error.message
+        : "Responses websocket upgrade failed",
+  };
 }
 
 function readWebSocketEvents(
@@ -492,34 +531,12 @@ function emitReadyToolCalls(toolCalls: Map<string, PendingResponsesToolCall>) {
       callId: toolCall.callId,
       name: toolCall.name,
       arguments: toolCall.arguments,
+      providerItemId: toolCall.providerItemId,
+      rawProviderItem: toolCall.rawProviderItem,
     });
   }
 
   return events;
-}
-
-function completedToolCalls(toolCalls: Map<string, PendingResponsesToolCall>) {
-  return [...toolCalls.values()].flatMap((toolCall) => {
-    if (
-      !toolCall.finalized ||
-      !toolCall.callId ||
-      !toolCall.name ||
-      toolCall.arguments === undefined
-    ) {
-      return [];
-    }
-
-    return [
-      {
-        type: "function_call" as const,
-        callId: toolCall.callId,
-        name: toolCall.name,
-        arguments: toolCall.arguments,
-        providerItemId: toolCall.providerItemId,
-        rawProviderItem: toolCall.rawProviderItem,
-      },
-    ];
-  });
 }
 
 type PendingResponsesToolCall = {

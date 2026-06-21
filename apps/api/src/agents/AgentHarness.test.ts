@@ -19,35 +19,42 @@ describe("AgentHarness", () => {
     const createModelClient = vi.fn((input: CreateClientInput) => fakeClient([
       { type: "response.created", id: "resp_1" },
       { type: "text.delta", delta: "Hello" },
-      { type: "conversation.created", conversationId: 42 },
       { type: "response.completed", id: "resp_1", outputText: "Hello" }
     ]));
+    const conversationStore = createConversationStore();
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
-      conversationStore: createConversationStore(),
+      conversationStore,
       createModelClient
     });
 
-    const events = await collect(harness.run({
+    await expect(harness.run({
       providerKey: "openai",
       model: "gpt-test",
-      input: [{ type: "message", role: "user", content: "Hi" }]
-    }));
+      input: "Hi"
+    })).resolves.toBeUndefined();
 
     expect(createModelClient).toHaveBeenCalledOnce();
     expect(createModelClient.mock.calls[0]![0]).toMatchObject({
       auth: { bearerToken: "sk-test" },
       provider: { key: "openai", baseUrl: "https://api.example.test/v1" }
     });
-    expect(events).toEqual([
-      { type: "run.started", providerKey: "openai", model: "gpt-test", conversationId: undefined },
-      { type: "response.created", id: "resp_1" },
-      { type: "text.delta", delta: "Hello" },
-      { type: "conversation.created", conversationId: 42 },
-      { type: "response.completed", id: "resp_1", outputText: "Hello" },
-      { type: "run.completed", conversationId: 42, responseId: "resp_1" }
-    ]);
+    expect(conversationStore.startedModelCalls).toEqual([{
+      providerKey: "openai",
+      model: "gpt-test",
+      transport: "responses",
+      input: [{ type: "message", role: "user", content: "Hi" }],
+      transcriptUserPrompt: "Hi"
+    }]);
+    expect(conversationStore.completedModelCalls).toEqual([{
+      conversationId: 42,
+      modelCallId: 1,
+      responseId: "resp_1",
+      outputText: "Hello",
+      functionCalls: [],
+      usage: undefined
+    }]);
   });
 
   it("refreshes OAuth credentials and retries when auth fails before model work", async () => {
@@ -77,19 +84,20 @@ describe("AgentHarness", () => {
             { type: "response.completed", id: "resp_retry", outputText: "Recovered" }
           ]);
     });
+    const conversationStore = createConversationStore();
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
-      conversationStore: createConversationStore(),
+      conversationStore,
       refreshOAuthToken,
       createModelClient
     });
 
-    const events = await collect(harness.run({
+    await expect(harness.run({
       providerKey: "openai",
       model: "gpt-test",
-      input: [{ type: "message", role: "user", content: "Hi" }]
-    }));
+      input: "Hi"
+    })).resolves.toBeUndefined();
 
     expect(tokens).toEqual(["old-token", "new-token"]);
     expect(refreshOAuthToken).toHaveBeenCalledWith({
@@ -97,13 +105,6 @@ describe("AgentHarness", () => {
       clientId: "client_123",
       refreshToken: "refresh-token"
     });
-    expect(events).toEqual([
-      { type: "run.started", providerKey: "openai", model: "gpt-test", conversationId: undefined },
-      { type: "response.created", id: "resp_retry" },
-      { type: "text.delta", delta: "Recovered" },
-      { type: "response.completed", id: "resp_retry", outputText: "Recovered" },
-      { type: "run.completed", conversationId: undefined, responseId: "resp_retry" }
-    ]);
   });
 
   it("does not retry an auth failure after model work has started", async () => {
@@ -130,27 +131,24 @@ describe("AgentHarness", () => {
       createModelClient
     });
 
-    const events = await collect(harness.run({
+    await expect(harness.run({
       providerKey: "openai",
       model: "gpt-test",
-      input: [{ type: "message", role: "user", content: "Hi" }]
-    }));
+      input: "Hi"
+    })).rejects.toMatchObject({
+      message: "expired",
+      status: 401,
+      code: "invalid_token"
+    });
 
     expect(createModelClient).toHaveBeenCalledOnce();
     expect(refreshOAuthToken).not.toHaveBeenCalled();
-    expect(events).toEqual([
-      { type: "run.started", providerKey: "openai", model: "gpt-test", conversationId: undefined },
-      { type: "text.delta", delta: "Partial" },
-      { type: "error", status: 401, code: "invalid_token", message: "expired" },
-      { type: "run.failed", status: 401, code: "invalid_token", message: "expired" }
-    ]);
   });
 });
 
 type CreateClientInput = {
   provider: ProviderRecord;
   auth: ProviderAuth;
-  conversationStore: ConversationStore;
 };
 
 function fakeClient(events: ModelStreamEvent[]): ModelClient {
@@ -162,21 +160,61 @@ function fakeClient(events: ModelStreamEvent[]): ModelClient {
   };
 }
 
-function createConversationStore(): ConversationStore {
+function createConversationStore() {
+  const startedModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]> = [];
+  const completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]> = [];
+
   return {
-    async getState(conversationId, _providerKey) {
+    startedModelCalls,
+    completedModelCalls,
+    async getState(conversationId) {
       return {
         conversationId,
         items: []
       };
     },
-    async appendModelCall(input) {
+    async startModelCall(input) {
+      startedModelCalls.push(input);
+
       return {
-        conversationId: input.conversationId ?? 1,
+        conversationId: 42,
+        modelCallId: 1,
+        requestContext: {
+          historyItems: []
+        },
+        lifecycle: {
+          createdConversation: true,
+          createdModelCall: true
+        }
+      };
+    },
+    async completeModelCall(input) {
+      completedModelCalls.push(input);
+
+      return {
+        conversationId: input.conversationId,
         previousResponseId: input.responseId,
         items: []
       };
+    },
+    async failModelCall(input) {
+      return {
+        conversationId: input.conversationId,
+        items: []
+      };
+    },
+    async abortModelCall(input) {
+      return {
+        conversationId: input.conversationId,
+        items: []
+      };
+    },
+    async abortRunningModelCalls() {
+      return 0;
     }
+  } satisfies ConversationStore & {
+    startedModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]>;
+    completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]>;
   };
 }
 
@@ -227,14 +265,3 @@ function createStore(input: {
     }))
   } as unknown as ProviderAccessStore;
 }
-
-async function collect(stream: AsyncIterable<unknown>) {
-  const events: unknown[] = [];
-
-  for await (const event of stream) {
-    events.push(event);
-  }
-
-  return events;
-}
-
