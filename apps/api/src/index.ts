@@ -1,14 +1,14 @@
 import { migrateDatabase } from "@/db/client";
 import { env } from "@/env";
-import { createDrizzleConversationStore } from "@/modelClients/conversationStore";
+import { initializeConversationManager } from "@/conversations/ConversationManager";
 import { buildServer } from "@/server";
 
 migrateDatabase();
 
-const app = await buildServer();
-const conversationStore = createDrizzleConversationStore();
+const conversationManager = await initializeConversationManager();
+const app = await buildServer({ conversationManager });
 
-const abortedModelCalls = await conversationStore.abortRunningModelCalls();
+const abortedModelCalls = await conversationManager.abortRunningModelCalls();
 
 if (abortedModelCalls > 0) {
   app.log.warn(

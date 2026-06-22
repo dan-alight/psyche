@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentHarness } from "@/agents/AgentHarness";
+import { ConversationManager } from "@/conversations/ConversationManager";
 import type { ConversationStore } from "@/modelClients/conversationStore";
 import type { ModelCallRequest, ModelClient, ModelStreamEvent, ProviderAuth } from "@/modelClients/types";
 import { encryptPayload } from "@/credentialCrypto";
@@ -25,7 +26,10 @@ describe("AgentHarness", () => {
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
-      conversationStore,
+      conversationManager: new ConversationManager({
+        store: conversationStore,
+        initialTranscriptItemId: 0,
+      }),
       createModelClient
     });
 
@@ -88,7 +92,10 @@ describe("AgentHarness", () => {
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
-      conversationStore,
+      conversationManager: new ConversationManager({
+        store: conversationStore,
+        initialTranscriptItemId: 0,
+      }),
       refreshOAuthToken,
       createModelClient
     });
@@ -126,7 +133,10 @@ describe("AgentHarness", () => {
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
-      conversationStore: createConversationStore(),
+      conversationManager: new ConversationManager({
+        store: createConversationStore(),
+        initialTranscriptItemId: 0,
+      }),
       refreshOAuthToken,
       createModelClient
     });
@@ -173,12 +183,22 @@ function createConversationStore() {
         items: []
       };
     },
+    async getMaxTranscriptItemId() {
+      return 0;
+    },
+    async listTranscriptItemsAfterId() {
+      return [];
+    },
+    async listRecentModelCallsWithTranscriptItems() {
+      return [];
+    },
     async startModelCall(input) {
       startedModelCalls.push(input);
 
       return {
         conversationId: 42,
         modelCallId: 1,
+        transcriptItems: [],
         requestContext: {
           historyItems: []
         },
@@ -194,7 +214,8 @@ function createConversationStore() {
       return {
         conversationId: input.conversationId,
         previousResponseId: input.responseId,
-        items: []
+        items: [],
+        transcriptItems: []
       };
     },
     async failModelCall(input) {

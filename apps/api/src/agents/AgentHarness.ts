@@ -1,8 +1,8 @@
+import type { StartedModelCall } from "@/modelClients/conversationStore";
 import {
-  createDrizzleConversationStore,
-  type ConversationStore,
-  type StartedModelCall,
-} from "@/modelClients/conversationStore";
+  ConversationManager,
+  getConversationManager,
+} from "@/conversations/ConversationManager";
 import {
   resolveActiveProviderAuth,
   type ResolveActiveProviderAuthInput,
@@ -25,7 +25,7 @@ import type { AgentRunInput } from "@/agents/types";
 export type AgentHarnessOptions = {
   store: ProviderAccessStore;
   credentialEncryptionKey: string;
-  conversationStore?: ConversationStore;
+  conversationManager?: ConversationManager;
   refreshOAuthToken?: ResolveActiveProviderAuthInput["refreshOAuthToken"];
   createModelClient?: (input: {
     provider: ProviderRecord;
@@ -73,10 +73,8 @@ export class AgentHarness {
       status: "incomplete",
       output: emptyCapturedModelOutput(),
     };
-    const modelStreamEvents: ModelStreamEvent[] = [];
 
-    const conversationStore =
-      this.options.conversationStore ?? createDrizzleConversationStore();
+    const conversationManager = this.resolveConversationManager();
     const modelInput = toUserPromptModelInput(input.input);
     let modelCallFinished = false;
 
@@ -91,7 +89,7 @@ export class AgentHarness {
 
       const transport = selectModelClientTransport(provider);
 
-      startedModelCall = await conversationStore.startModelCall({
+      startedModelCall = await conversationManager.startModelCall({
         providerKey: input.providerKey,
         model: input.model,
         transport,
@@ -99,6 +97,14 @@ export class AgentHarness {
         transcriptUserPrompt: input.input,
       });
       const request = toModelCallRequest(input, startedModelCall, modelInput);
+      const { conversationId, modelCallId } = startedModelCall;
+      const recordTextDelta = async (delta: string) => {
+        await conversationManager.recordTextDelta({
+          conversationId,
+          modelCallId,
+          delta,
+        });
+      };
 
       const firstClient = await this.createClient(provider, false);
 
@@ -106,7 +112,7 @@ export class AgentHarness {
         streamResult = await streamModelAttempt(
           firstClient,
           request,
-          modelStreamEvents,
+          recordTextDelta,
         );
       } finally {
         firstClient.close?.();
@@ -119,7 +125,7 @@ export class AgentHarness {
           streamResult = await streamModelAttempt(
             refreshedClient,
             request,
-            modelStreamEvents,
+            recordTextDelta,
           );
         } finally {
           refreshedClient.close?.();
@@ -128,7 +134,7 @@ export class AgentHarness {
 
       if (streamResult.status === "needs_fresh_credentials") {
         await failModelCall(
-          conversationStore,
+          conversationManager,
           startedModelCall,
           streamResult.output,
         );
@@ -140,7 +146,7 @@ export class AgentHarness {
 
       if (streamResult.status === "failed") {
         await failModelCall(
-          conversationStore,
+          conversationManager,
           startedModelCall,
           streamResult.output,
         );
@@ -150,7 +156,7 @@ export class AgentHarness {
 
       if (streamResult.status === "incomplete") {
         await failModelCall(
-          conversationStore,
+          conversationManager,
           startedModelCall,
           streamResult.output,
         );
@@ -158,7 +164,7 @@ export class AgentHarness {
         throw new Error("Model stream ended before response completed");
       }
 
-      await conversationStore.completeModelCall({
+      await conversationManager.completeModelCall({
         conversationId: startedModelCall.conversationId,
         modelCallId: startedModelCall.modelCallId,
         responseId: streamResult.output.responseId,
@@ -170,7 +176,7 @@ export class AgentHarness {
     } catch (error) {
       if (startedModelCall && !modelCallFinished) {
         await tryFailModelCall(
-          conversationStore,
+          conversationManager,
           startedModelCall,
           streamResult.output,
         );
@@ -193,6 +199,14 @@ export class AgentHarness {
       provider,
       auth,
     });
+  }
+
+  private resolveConversationManager() {
+    if (this.options.conversationManager) {
+      return this.options.conversationManager;
+    }
+
+    return getConversationManager();
   }
 }
 
@@ -252,7 +266,7 @@ function emptyCapturedModelOutput(): CapturedModelOutput {
 }
 
 async function failModelCall(
-  conversationStore: ConversationStore,
+  conversationStore: Pick<ConversationManager, "failModelCall">,
   startedModelCall: StartedModelCall,
   output: CapturedModelOutput,
 ) {
@@ -264,7 +278,7 @@ async function failModelCall(
 }
 
 async function tryFailModelCall(
-  conversationStore: ConversationStore,
+  conversationStore: Pick<ConversationManager, "failModelCall">,
   startedModelCall: StartedModelCall,
   output: CapturedModelOutput,
 ) {
@@ -278,10 +292,9 @@ async function tryFailModelCall(
 async function streamModelAttempt(
   client: ModelClient,
   request: ModelCallRequest,
-  events: ModelStreamEvent[],
+  onTextDelta: (delta: string) => Promise<void>,
 ): Promise<ModelStreamAttemptResult> {
   let emittedModelWork = false;
-  const pendingEvents: ModelStreamEvent[] = [];
   const output = emptyCapturedModelOutput();
   let completed = false;
   let failure: Extract<ModelStreamEvent, { type: "error" }> | undefined;
@@ -300,17 +313,15 @@ async function streamModelAttempt(
 
     if (isModelWork(event)) {
       emittedModelWork = true;
-      events.push(...pendingEvents.splice(0));
     }
 
     if (emittedModelWork) {
-      events.push(event);
-    } else {
-      pendingEvents.push(event);
+      if (event.type === "text.delta") {
+        await onTextDelta(event.delta);
+      }
     }
   }
 
-  events.push(...pendingEvents);
   if (failure) {
     return { status: "failed", output, error: failure };
   }

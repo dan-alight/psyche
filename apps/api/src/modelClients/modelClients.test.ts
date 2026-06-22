@@ -580,6 +580,15 @@ function createMemoryConversationStore(initial: ConversationState) {
     async getState(conversationId: number) {
       return { ...state, conversationId };
     },
+    async getMaxTranscriptItemId() {
+      return 0;
+    },
+    async listTranscriptItemsAfterId() {
+      return [];
+    },
+    async listRecentModelCallsWithTranscriptItems() {
+      return [];
+    },
     async startModelCall(input: Parameters<ConversationStore["startModelCall"]>[0]) {
       const historyItems = [...state.items];
       const modelCallId = nextModelCallId;
@@ -595,6 +604,7 @@ function createMemoryConversationStore(initial: ConversationState) {
       return {
         conversationId: state.conversationId,
         modelCallId,
+        transcriptItems: [],
         requestContext: {
           previousResponseId: state.previousResponseId,
           historyItems,
@@ -620,7 +630,7 @@ function createMemoryConversationStore(initial: ConversationState) {
       });
       state.previousResponseId = input.responseId ?? state.previousResponseId;
       state.conversationId = input.conversationId;
-      return { ...state, items: [...state.items] };
+      return { ...state, items: [...state.items], transcriptItems: [] };
     },
     async failModelCall(input: Parameters<ConversationStore["failModelCall"]>[0]) {
       failedModelCalls.push(input);

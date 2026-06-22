@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -8,10 +8,12 @@ import {
   type ConversationItem,
   type ConversationItemInsert,
   conversationModelCall,
+  type ConversationModelCall,
   type ConversationModelCallInsert,
   conversationModelCallToolUsage,
   type ConversationModelCallToolUsageInsert,
   conversationTranscriptItem,
+  type ConversationTranscriptItem,
   type ConversationTranscriptItemInsert,
   toolDefinition,
   type ToolDefinitionInsert,
@@ -41,6 +43,7 @@ export type StartModelCallInput = {
 export type StartedModelCall = {
   conversationId: number;
   modelCallId: number;
+  transcriptItems: ConversationTranscriptItem[];
   requestContext: {
     previousResponseId?: string;
     historyItems: ConversationItem[];
@@ -71,6 +74,15 @@ export type AbortModelCallInput = {
   modelCallId: number;
 };
 
+export type ConversationMutationResult = ConversationState & {
+  transcriptItems: ConversationTranscriptItem[];
+};
+
+export type ConversationModelCallWithTranscriptItems = {
+  modelCall: ConversationModelCall;
+  transcriptItems: ConversationTranscriptItem[];
+};
+
 export type ConversationTranscriptItemInput =
   | {
       kind: "user_prompt";
@@ -89,8 +101,18 @@ export type ConversationTranscriptItemInput =
 
 export type ConversationStore = {
   getState(conversationId: number): Promise<ConversationState>;
+  getMaxTranscriptItemId(): Promise<number>;
+  listTranscriptItemsAfterId(
+    afterTranscriptItemId: number,
+  ): Promise<ConversationTranscriptItem[]>;
+  listRecentModelCallsWithTranscriptItems(input: {
+    limit: number;
+    statuses: ConversationModelCall["status"][];
+  }): Promise<ConversationModelCallWithTranscriptItems[]>;
   startModelCall(input: StartModelCallInput): Promise<StartedModelCall>;
-  completeModelCall(input: CompleteModelCallInput): Promise<ConversationState>;
+  completeModelCall(
+    input: CompleteModelCallInput,
+  ): Promise<ConversationMutationResult>;
   failModelCall(input: FailModelCallInput): Promise<ConversationState>;
   abortModelCall(input: AbortModelCallInput): Promise<ConversationState>;
   abortRunningModelCalls(): Promise<number>;
@@ -100,6 +122,20 @@ export function createDrizzleConversationStore(): ConversationStore {
   return {
     async getState(conversationId) {
       return getOrCreateState(conversationId);
+    },
+    async getMaxTranscriptItemId() {
+      return selectMaxTranscriptItemId();
+    },
+    async listTranscriptItemsAfterId(afterTranscriptItemId) {
+      return db
+        .select()
+        .from(conversationTranscriptItem)
+        .where(gt(conversationTranscriptItem.id, afterTranscriptItemId))
+        .orderBy(asc(conversationTranscriptItem.id))
+        .all();
+    },
+    async listRecentModelCallsWithTranscriptItems(input) {
+      return listRecentModelCallsWithTranscriptItems(input);
     },
     async startModelCall(input) {
       const now = new Date();
@@ -156,7 +192,7 @@ export function createDrizzleConversationStore(): ConversationStore {
           tx.insert(conversationItem).values(itemInputs).run();
         }
 
-        persistConversationTranscriptItems(tx, {
+        const transcriptItems = persistConversationTranscriptItems(tx, {
           conversationId,
           modelCallId: modelCall.id,
           now,
@@ -173,6 +209,7 @@ export function createDrizzleConversationStore(): ConversationStore {
         return {
           conversationId,
           modelCallId: modelCall.id,
+          transcriptItems,
           requestContext: {
             previousResponseId,
             historyItems,
@@ -217,14 +254,17 @@ export function createDrizzleConversationStore(): ConversationStore {
           tx.insert(conversationItem).values(itemInputs).run();
         }
 
-        persistConversationTranscriptItems(tx, {
+        const transcriptItems = persistConversationTranscriptItems(tx, {
           conversationId: input.conversationId,
           modelCallId: input.modelCallId,
           now,
           items: toCompletionTranscriptItems(input),
         });
 
-        return selectState(tx, input.conversationId);
+        return {
+          ...selectState(tx, input.conversationId),
+          transcriptItems,
+        };
       });
     },
     async failModelCall(input) {
@@ -518,7 +558,7 @@ function persistConversationTranscriptItems(
   },
 ) {
   if (input.items.length === 0) {
-    return;
+    return [];
   }
 
   const firstSequence = nextTranscriptSequence(tx, input.conversationId);
@@ -532,7 +572,70 @@ function persistConversationTranscriptItems(
     }),
   );
 
-  tx.insert(conversationTranscriptItem).values(itemInputs).run();
+  return tx
+    .insert(conversationTranscriptItem)
+    .values(itemInputs)
+    .returning()
+    .all();
+}
+
+function listRecentModelCallsWithTranscriptItems(input: {
+  limit: number;
+  statuses: ConversationModelCall["status"][];
+}): ConversationModelCallWithTranscriptItems[] {
+  const modelCalls = db
+    .select()
+    .from(conversationModelCall)
+    .where(inArray(conversationModelCall.status, input.statuses))
+    .orderBy(desc(conversationModelCall.id))
+    .limit(input.limit)
+    .all();
+
+  if (modelCalls.length === 0) {
+    return [];
+  }
+
+  const modelCallIds = modelCalls.map((modelCall) => modelCall.id);
+  const transcriptItems = db
+    .select()
+    .from(conversationTranscriptItem)
+    .where(inArray(conversationTranscriptItem.modelCallId, modelCallIds))
+    .orderBy(asc(conversationTranscriptItem.id))
+    .all();
+  const transcriptItemsByModelCallId = new Map<
+    number,
+    ConversationTranscriptItem[]
+  >();
+
+  for (const item of transcriptItems) {
+    if (item.modelCallId === null) {
+      continue;
+    }
+
+    const existing = transcriptItemsByModelCallId.get(item.modelCallId);
+
+    if (existing) {
+      existing.push(item);
+    } else {
+      transcriptItemsByModelCallId.set(item.modelCallId, [item]);
+    }
+  }
+
+  return modelCalls.map((modelCall) => ({
+    modelCall,
+    transcriptItems: transcriptItemsByModelCallId.get(modelCall.id) ?? [],
+  }));
+}
+
+function selectMaxTranscriptItemId() {
+  const latest = db
+    .select({ id: conversationTranscriptItem.id })
+    .from(conversationTranscriptItem)
+    .orderBy(desc(conversationTranscriptItem.id))
+    .limit(1)
+    .get();
+
+  return latest?.id ?? 0;
 }
 
 function toConversationTranscriptItemInsert(input: {
