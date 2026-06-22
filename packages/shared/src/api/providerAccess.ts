@@ -21,6 +21,10 @@ export const providerCreateRequestSchema = z.object({
   baseUrl: z.string().url()
 });
 
+export const providerResponseSchema = providerCreateRequestSchema.extend({
+  id: z.number().int().positive()
+});
+
 export const modelCreateRequestSchema = z.object({
   providerId: z.number().int().positive(),
   modelId: z.string().min(1),
@@ -49,6 +53,15 @@ export const credentialActivateParamsSchema = z.object({
   credentialId: z.coerce.number().int().positive()
 });
 
+export const credentialResponseSchema = z.object({
+  id: z.number().int().positive(),
+  providerId: z.number().int().positive(),
+  label: z.string().min(1),
+  kind: credentialKindSchema,
+  expiresAt: z.coerce.date().nullable(),
+  active: z.boolean()
+});
+
 export const oauthConfigCreateRequestSchema = z.object({
   providerId: z.number().int().positive(),
   authorizeUrl: z.string().url(),
@@ -65,17 +78,26 @@ export const oauthCompleteRequestSchema = z.object({
   label: z.string().min(1).optional()
 });
 
+export const oauthStartResponseSchema = z.object({
+  providerKey: z.string().min(1),
+  authorizeUrl: z.string().url(),
+  state: z.string().min(1)
+});
+
 export const oauthCallbackQuerySchema = z.object({
   code: z.string().min(1),
   state: z.string().min(1)
 });
 
 export type ProviderCreateRequest = z.infer<typeof providerCreateRequestSchema>;
+export type ProviderResponse = z.infer<typeof providerResponseSchema>;
 export type ModelCreateRequest = z.infer<typeof modelCreateRequestSchema>;
 export type ApiKeyCredentialPayload = z.infer<typeof apiKeyCredentialPayloadSchema>;
 export type OAuthCredentialPayload = z.infer<typeof oauthCredentialPayloadSchema>;
 export type CredentialCreateRequest = z.infer<typeof credentialCreateRequestSchema>;
 export type CredentialActivateParams = z.infer<typeof credentialActivateParamsSchema>;
+export type CredentialResponse = z.infer<typeof credentialResponseSchema>;
 export type OAuthConfigCreateRequest = z.infer<typeof oauthConfigCreateRequestSchema>;
 export type OAuthCompleteRequest = z.infer<typeof oauthCompleteRequestSchema>;
+export type OAuthStartResponse = z.infer<typeof oauthStartResponseSchema>;
 export type OAuthCallbackQuery = z.infer<typeof oauthCallbackQuerySchema>;

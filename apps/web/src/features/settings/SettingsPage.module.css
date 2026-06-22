@@ -1,0 +1,129 @@
+.page {
+  width: min(60rem, calc(100% - var(--space-7)));
+  margin: 0 auto;
+  padding: var(--space-8) 0;
+}
+
+.header {
+  margin-bottom: var(--space-7);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  line-height: var(--line-height-tight);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+}
+
+.oauthPanel {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.accountSummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.label {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-extra-bold);
+  line-height: var(--line-height-tight);
+}
+
+.connectedBadge,
+.pendingBadge {
+  display: inline-flex;
+  min-height: var(--size-control-sm);
+  align-items: center;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  padding: 0 var(--space-3);
+}
+
+.connectedBadge {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success-strong);
+}
+
+.pendingBadge {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.credentialDetails {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.credentialDetails div {
+  min-width: 0;
+}
+
+.credentialDetails dt {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.credentialDetails dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+}
+
+.success,
+.error {
+  margin: var(--space-4) 0 0;
+  font-weight: var(--font-weight-bold);
+}
+
+.success {
+  color: var(--color-success-strong);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 36rem) {
+  .page {
+    width: min(100% - var(--space-4), 60rem);
+    padding: var(--space-6) 0;
+  }
+
+  .accountSummary,
+  .actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .credentialDetails {
+    grid-template-columns: 1fr;
+  }
+}
