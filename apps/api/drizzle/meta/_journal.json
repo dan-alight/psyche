@@ -57,6 +57,13 @@
       "when": 1781941583277,
       "tag": "0007_rapid_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1782091320000,
+      "tag": "0008_seed_openai_provider",
+      "breakpoints": true
     }
   ]
 }
