@@ -154,6 +154,7 @@ describe("AgentHarness", () => {
     expect(createModelClient).toHaveBeenCalledOnce();
     expect(refreshOAuthToken).not.toHaveBeenCalled();
   });
+
 });
 
 type CreateClientInput = {

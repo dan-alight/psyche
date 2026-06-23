@@ -133,7 +133,7 @@ export const conversationTranscriptItem = sqliteTable("conversation_transcript_i
     .notNull()
     .references(() => conversation.id, { onDelete: "cascade" }),
   modelCallId: integer("model_call_id")
-    .references(() => conversationModelCall.id, { onDelete: "set null" }),
+    .references(() => conversationModelCall.id, { onDelete: "cascade" }),
   sequence: integer("sequence").notNull(),
   kind: text("kind", { enum: ["user_prompt", "function_call", "assistant_output"] }).notNull(),
   content: text("content"),

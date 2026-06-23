@@ -23,8 +23,10 @@ describe("resolveActiveProviderAuth", () => {
       credentialEncryptionKey: secret
     })).resolves.toEqual({
       bearerToken: "sk-test",
-      organization: "org_123",
-      project: "proj_123"
+      openai: {
+        organization: "org_123",
+        project: "proj_123"
+      }
     });
   });
 
@@ -70,6 +72,46 @@ describe("resolveActiveProviderAuth", () => {
       access_token: "new-token",
       refresh_token: "refresh-token",
       token_type: "bearer"
+    });
+  });
+
+  it("returns ChatGPT account auth from OAuth JWT claims", async () => {
+    const store = createStore({
+      kind: "oauth",
+      encryptedPayload: encryptPayload({
+        access_token: jwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "account_123",
+            organization_id: "org_123",
+            project_id: "proj_123"
+          }
+        }),
+        refresh_token: "refresh-token"
+      }, secret),
+      expiresAt: new Date("2999-01-01T00:00:00Z")
+    });
+
+    await expect(resolveActiveProviderAuth({
+      store,
+      providerKey: "openai",
+      credentialEncryptionKey: secret
+    })).resolves.toEqual({
+      bearerToken: jwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "account_123",
+          organization_id: "org_123",
+          project_id: "proj_123"
+        }
+      }),
+      openai: {
+        organization: "org_123",
+        project: "proj_123",
+        chatgpt: {
+          accountId: "account_123",
+          originator: "psyche",
+          beta: "responses=experimental"
+        }
+      }
     });
   });
 
@@ -163,4 +205,12 @@ function createStore(credential: Pick<CredentialRecord, "kind" | "encryptedPaylo
         }
       : undefined)
   } as unknown as ProviderAccessStore;
+}
+
+function jwt(payload: Record<string, unknown>) {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+    Buffer.from(JSON.stringify(payload)).toString("base64url"),
+    "signature"
+  ].join(".");
 }

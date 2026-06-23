@@ -12,7 +12,9 @@ export const oauthCredentialPayloadSchema = z.object({
   access_token: z.string().min(1),
   token_type: z.string().optional(),
   refresh_token: z.string().min(1).optional(),
-  scope: z.string().optional()
+  scope: z.string().optional(),
+  id_token: z.string().min(1).optional(),
+  account_id: z.string().min(1).optional()
 }).passthrough();
 
 export const providerCreateRequestSchema = z.object({
@@ -29,6 +31,10 @@ export const modelCreateRequestSchema = z.object({
   providerId: z.number().int().positive(),
   modelId: z.string().min(1),
   name: z.string().min(1)
+});
+
+export const modelResponseSchema = modelCreateRequestSchema.extend({
+  id: z.number().int().positive()
 });
 
 const credentialCreateBaseSchema = z.object({
@@ -92,6 +98,7 @@ export const oauthCallbackQuerySchema = z.object({
 export type ProviderCreateRequest = z.infer<typeof providerCreateRequestSchema>;
 export type ProviderResponse = z.infer<typeof providerResponseSchema>;
 export type ModelCreateRequest = z.infer<typeof modelCreateRequestSchema>;
+export type ModelResponse = z.infer<typeof modelResponseSchema>;
 export type ApiKeyCredentialPayload = z.infer<typeof apiKeyCredentialPayloadSchema>;
 export type OAuthCredentialPayload = z.infer<typeof oauthCredentialPayloadSchema>;
 export type CredentialCreateRequest = z.infer<typeof credentialCreateRequestSchema>;

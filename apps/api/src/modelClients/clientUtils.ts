@@ -11,8 +11,11 @@ export function providerHeaders(
   return {
     Authorization: `Bearer ${auth.bearerToken}`,
     ...(options.contentType ? { "Content-Type": "application/json" } : {}),
-    ...optionalHeader("OpenAI-Organization", auth.organization),
-    ...optionalHeader("OpenAI-Project", auth.project),
+    ...optionalHeader("OpenAI-Organization", auth.openai?.organization),
+    ...optionalHeader("OpenAI-Project", auth.openai?.project),
+    ...optionalHeader("chatgpt-account-id", auth.openai?.chatgpt?.accountId),
+    ...optionalHeader("originator", auth.openai?.chatgpt?.originator),
+    ...optionalHeader("OpenAI-Beta", auth.openai?.chatgpt?.beta),
   };
 }
 

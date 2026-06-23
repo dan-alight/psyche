@@ -8,7 +8,10 @@ import {
   parseJsonRecord,
   providerHeaders,
 } from "@/modelClients/clientUtils";
-import { toResponsesCreateEvent } from "@/modelClients/requestMapping";
+import {
+  toResponsesCreateEvent,
+  toResponsesInputWithHistory,
+} from "@/modelClients/requestMapping";
 import type {
   ModelCallRequest,
   ModelClient,
@@ -32,12 +35,6 @@ export class ResponsesClient implements ModelClient {
   constructor(private readonly options: ResponsesClientOptions) {}
 
   async *stream(request: ModelCallRequest): AsyncIterable<ModelStreamEvent> {
-    if (request.store === false) {
-      throw new Error(
-        "Responses conversations require store=true for resumable previous_response_id continuity",
-      );
-    }
-
     if (this.inFlight) {
       throw new Error("Responses websocket already has an in-flight response");
     }
@@ -65,12 +62,7 @@ export class ResponsesClient implements ModelClient {
         throw error;
       }
 
-      const responseCreateEvent = {
-        ...toResponsesCreateEvent(request, {
-          previousResponseId: request.previousResponseId,
-        }),
-        store: request.store ?? true,
-      };
+      const responseCreateEvent = toResponseCreateEvent(request);
       const events = readWebSocketEvents(socket, request.signal);
       socket.send(JSON.stringify(responseCreateEvent));
 
@@ -131,7 +123,9 @@ export class ResponsesClient implements ModelClient {
   }
 
   close() {
-    this.socket?.close();
+    if (this.socket) {
+      closeSocket(this.socket);
+    }
     this.socket = undefined;
   }
 
@@ -165,7 +159,7 @@ export class ResponsesClient implements ModelClient {
       if (this.socket === socket) {
         this.socket = undefined;
       }
-      socket.close();
+      closeSocket(socket);
       throw error;
     }
 
@@ -175,6 +169,24 @@ export class ResponsesClient implements ModelClient {
   private headers() {
     return providerHeaders(this.options.auth);
   }
+}
+
+function toResponseCreateEvent(
+  request: ModelCallRequest,
+) {
+  const store = request.store ?? true;
+  const input = store === false
+    ? toResponsesInputWithHistory(request.historyItems, request.input)
+    : undefined;
+
+  return {
+    ...toResponsesCreateEvent(request, {
+      previousResponseId:
+        store === false ? undefined : request.previousResponseId,
+    }),
+    ...(input ? { input } : {}),
+    store,
+  };
 }
 
 function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
@@ -237,7 +249,7 @@ function waitForSocketOpen(socket: WebSocket, signal: AbortSignal | undefined) {
     };
     const onAbort = () => {
       cleanup();
-      socket.close();
+      closeSocket(socket);
       reject(new Error("Responses websocket stream was aborted"));
     };
 
@@ -335,7 +347,7 @@ function readWebSocketEvents(
   };
   const onAbort = () => {
     settled = true;
-    socket.close();
+    closeSocket(socket);
     wake();
   };
 
@@ -373,6 +385,20 @@ function readWebSocketEvents(
       }
     },
   };
+}
+
+function closeSocket(socket: WebSocket) {
+  if (socket.readyState === WebSocket.CLOSED) {
+    return;
+  }
+
+  if (socket.readyState === WebSocket.CONNECTING) {
+    socket.once("error", () => {
+      // ws emits an error when a connecting socket is closed intentionally.
+    });
+  }
+
+  socket.close();
 }
 
 function toModelStreamEvents(

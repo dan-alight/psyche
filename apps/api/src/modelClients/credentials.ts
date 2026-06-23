@@ -37,8 +37,10 @@ export async function resolveActiveProviderAuth(input: ResolveActiveProviderAuth
 
     return {
       bearerToken: parsed.apiKey,
-      organization: parsed.organization,
-      project: parsed.project
+      openai: removeUndefined({
+        organization: parsed.organization,
+        project: parsed.project,
+      })
     };
   }
 
@@ -48,9 +50,7 @@ export async function resolveActiveProviderAuth(input: ResolveActiveProviderAuth
     return refreshActiveOAuthCredential(input, credential.id);
   }
 
-  return {
-    bearerToken: parsed.access_token
-  };
+  return oauthPayloadToProviderAuth(parsed);
 }
 
 async function refreshActiveOAuthCredential(input: ResolveActiveProviderAuthInput, credentialId: number) {
@@ -121,9 +121,88 @@ async function refreshActiveOAuthCredentialUnlocked(input: ResolveActiveProvider
     throw new Error(`Active credential for provider '${input.providerKey}' was not found during refresh`);
   }
 
+  return oauthPayloadToProviderAuth(mergedPayload);
+}
+
+function oauthPayloadToProviderAuth(payload: Record<string, unknown>): ProviderAuth {
+  const openAiClaims = openAiAuthClaims(payload);
+  const chatgptAccountId =
+    stringValue(payload.account_id) ?? openAiClaims.chatgptAccountId;
+  const openai = removeUndefined({
+    organization: openAiClaims.organization,
+    project: openAiClaims.project,
+    chatgpt: chatgptAccountId
+      ? {
+          accountId: chatgptAccountId,
+          originator: "psyche",
+          beta: "responses=experimental",
+        }
+      : undefined,
+  });
+
+  return removeUndefined({
+    bearerToken: String(payload.access_token),
+    openai: hasEntries(openai) ? openai : undefined,
+  });
+}
+
+function openAiAuthClaims(payload: Record<string, unknown>) {
   return {
-    bearerToken: mergedPayload.access_token
+    chatgptAccountId:
+      openAiAuthClaim(payload.access_token, "chatgpt_account_id") ??
+      openAiAuthClaim(payload.id_token, "chatgpt_account_id"),
+    organization:
+      openAiAuthClaim(payload.access_token, "organization_id") ??
+      openAiAuthClaim(payload.id_token, "organization_id"),
+    project:
+      openAiAuthClaim(payload.access_token, "project_id") ??
+      openAiAuthClaim(payload.id_token, "project_id"),
   };
+}
+
+function openAiAuthClaim(token: unknown, key: string) {
+  const payload = jwtPayload(token);
+  const auth = isRecord(payload)
+    ? payload["https://api.openai.com/auth"]
+    : undefined;
+
+  return isRecord(auth) ? stringValue(auth[key]) : undefined;
+}
+
+function jwtPayload(token: unknown) {
+  if (typeof token !== "string") {
+    return undefined;
+  }
+
+  const [, payload] = token.split(".");
+
+  if (!payload) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry) => entry[1] !== undefined),
+  ) as T;
+}
+
+function hasEntries(value: Record<string, unknown>) {
+  return Object.keys(value).length > 0;
 }
 
 function isExpired(expiresAt: Date | null, now: Date) {

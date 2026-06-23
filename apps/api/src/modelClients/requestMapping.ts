@@ -32,8 +32,65 @@ export function toResponsesInput(input: ModelInput[]) {
     return [{
       type: "message",
       role: item.role,
-      content: [{ type: "input_text", text: item.content }]
+      content: [{ type: responsesMessageContentType(item.role), text: item.content }]
     }];
+  });
+}
+
+export function toResponsesInputWithHistory(
+  history: ConversationItem[],
+  input: ModelInput[],
+) {
+  return toResponsesInput([...toModelInputFromConversation(history), ...input]);
+}
+
+export function toModelInputFromConversation(items: ConversationItem[]): ModelInput[] {
+  return items.flatMap((item): ModelInput[] => {
+    if (
+      item.kind === "function_call_output" &&
+      item.toolCallId &&
+      item.toolOutput !== null
+    ) {
+      return [{
+        type: "function_call_output",
+        callId: item.toolCallId,
+        output: item.toolOutput
+      }];
+    }
+
+    if (
+      item.kind === "function_call" &&
+      item.toolCallId &&
+      item.toolName &&
+      item.toolArguments !== null
+    ) {
+      return [{
+        type: "function_call",
+        callId: item.toolCallId,
+        name: item.toolName,
+        arguments: item.toolArguments,
+        providerItemId: item.providerItemId ?? undefined,
+        rawProviderItem: item.rawProviderItem ?? undefined
+      }];
+    }
+
+    if (item.kind === "reasoning" && item.rawProviderItem) {
+      return [{
+        type: "reasoning",
+        providerItemId: item.providerItemId ?? undefined,
+        rawProviderItem: item.rawProviderItem
+      }];
+    }
+
+    if (item.kind === "message" && item.role && item.content !== null) {
+      return [{
+        type: "message",
+        role: item.role,
+        content: item.content
+      }];
+    }
+
+    return [];
   });
 }
 
@@ -247,6 +304,12 @@ function toChatAssistantMessage(items: ConversationItem[]) {
 function isAssistantOutputItem(item: ConversationItem | undefined) {
   return item?.kind === "function_call" || (item?.kind === "message" && item.role === "assistant");
 }
+
+function responsesMessageContentType(role: ModelInputRole) {
+  return role === "assistant" ? "output_text" : "input_text";
+}
+
+type ModelInputRole = Extract<ModelInput, { type: "message" }>["role"];
 
 function removeUndefined<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(

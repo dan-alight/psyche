@@ -462,13 +462,17 @@ describe("model clients", () => {
     ]);
   });
 
-  it("throws on store false for responses conversations", async () => {
+  it("sends full responses input and omits previous response id for store false", async () => {
     const store = createMemoryConversationStore({
       conversationId: 14,
       previousResponseId: "resp_previous",
       items: []
     });
-    const webSocketFactory = vi.fn(() => new FakeWebSocket([]) as unknown as WebSocket);
+    const socket = new FakeWebSocket([
+      { type: "response.created", response: { id: "resp_zdr" } },
+      { type: "response.completed", response: { id: "resp_zdr" } }
+    ]);
+    const webSocketFactory = vi.fn(() => socket as unknown as WebSocket);
     const client = new ResponsesClient({
       auth: { bearerToken: "token" },
       baseUrl: "https://api.openai.com/v1",
@@ -479,10 +483,70 @@ describe("model clients", () => {
       model: "test-model",
       store: false,
       input: [{ type: "message", role: "user", content: "Continue" }]
-    })))).rejects.toThrow(
-      "Responses conversations require store=true for resumable previous_response_id continuity",
-    );
-    expect(webSocketFactory).not.toHaveBeenCalled();
+    })))).resolves.toEqual([
+      { type: "response.created", id: "resp_zdr" },
+      { type: "response.completed", id: "resp_zdr", outputText: undefined, usage: undefined }
+    ]);
+    const sent = JSON.parse(socket.sent[0] ?? "{}");
+
+    expect(sent.store).toBe(false);
+    expect(sent.previous_response_id).toBeUndefined();
+  });
+
+  it("includes responses history for store false", async () => {
+    const store = createMemoryConversationStore({
+      conversationId: 24,
+      previousResponseId: "resp_missing_from_socket_cache",
+      items: [
+        conversationItem({
+          kind: "message",
+          role: "user",
+          content: "Earlier",
+          modelCallId: 1
+        }),
+        conversationItem({
+          kind: "message",
+          role: "assistant",
+          content: "Earlier answer",
+          modelCallId: 2
+        })
+      ]
+    });
+    const socket = new FakeWebSocket([
+      { type: "response.created", response: { id: "resp_recovered" } },
+      { type: "response.completed", response: { id: "resp_recovered" } }
+    ]);
+    const client = new ResponsesClient({
+      auth: { bearerToken: "token" },
+      baseUrl: "https://api.openai.com/v1",
+      webSocketFactory: () => socket as unknown as WebSocket
+    });
+
+    await collect(client.stream(store.modelRequest({
+      model: "test-model",
+      store: false,
+      input: [{ type: "message", role: "user", content: "Follow up" }]
+    })));
+    const sent = JSON.parse(socket.sent[0] ?? "{}");
+
+    expect(sent.previous_response_id).toBeUndefined();
+    expect(sent.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Earlier" }]
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Earlier answer" }]
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Follow up" }]
+      }
+    ]);
   });
 
   it("throws responses websocket failures", async () => {
@@ -844,6 +908,9 @@ class UnexpectedResponseWebSocket extends EventEmitter {
     }
 
     this.closeCount += 1;
+    if (this.readyState === 0) {
+      this.emit("error", new Error("WebSocket was closed before the connection was established"));
+    }
     this.readyState = 3;
     this.emit("close");
   }

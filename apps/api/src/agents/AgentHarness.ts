@@ -44,6 +44,7 @@ type ModelStreamAttemptResult =
   | {
       status: "needs_fresh_credentials";
       output: CapturedModelOutput;
+      error: Extract<ModelStreamEvent, { type: "error" }>;
     }
   | {
       status: "failed";
@@ -139,9 +140,7 @@ export class AgentHarness {
           streamResult.output,
         );
         modelCallFinished = true;
-        throw new Error(
-          "Model authentication failed after refreshing credentials",
-        );
+        throw modelStreamError(streamResult.error);
       }
 
       if (streamResult.status === "failed") {
@@ -242,7 +241,9 @@ function modelStreamError(event: Extract<ModelStreamEvent, { type: "error" }>) {
   });
 }
 
-function isAuthFailure(event: ModelStreamEvent) {
+function isAuthFailure(
+  event: ModelStreamEvent,
+): event is Extract<ModelStreamEvent, { type: "error" }> {
   return (
     event.type === "error" &&
     (event.status === 401 ||
@@ -308,6 +309,7 @@ async function streamModelAttempt(
       return {
         status: "needs_fresh_credentials",
         output,
+        error: event,
       };
     }
 

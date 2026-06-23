@@ -2,8 +2,19 @@ import type { ConversationItem } from "@/db/schema";
 
 export type ProviderAuth = {
   bearerToken: string;
+  openai?: OpenAiProviderAuth;
+};
+
+export type OpenAiProviderAuth = {
   organization?: string;
   project?: string;
+  chatgpt?: OpenAiChatGptAuth;
+};
+
+export type OpenAiChatGptAuth = {
+  accountId: string;
+  originator: string;
+  beta: string;
 };
 
 export type ModelClientTransport = "responses" | "chat_completions";
