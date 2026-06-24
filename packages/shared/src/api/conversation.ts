@@ -27,6 +27,9 @@ export const conversationModelCallSchema = z.object({
   previousResponseId: z.string().nullable(),
   responseId: z.string().nullable(),
   status: conversationModelCallStatusSchema,
+  failureMessage: z.string().nullable(),
+  failureCode: z.string().nullable(),
+  failureStatus: z.number().int().nullable(),
   usage: z.unknown().nullable(),
   createdAt: z.coerce.date(),
   completedAt: z.coerce.date().nullable(),
@@ -76,9 +79,23 @@ export const conversationTextDeltaEventSchema = z.object({
   delta: z.string(),
 });
 
+export const conversationModelCallErrorSchema = z.object({
+  message: z.string(),
+  code: z.string().optional(),
+  status: z.number().int().optional(),
+});
+
+export const conversationModelCallUpdatedEventSchema = z.object({
+  type: z.literal("model_call_updated"),
+  liveEventId: z.number().int().positive(),
+  modelCall: conversationModelCallSchema,
+  error: conversationModelCallErrorSchema.optional(),
+});
+
 export const conversationLiveEventSchema = z.discriminatedUnion("type", [
   conversationTranscriptItemEventSchema,
   conversationTextDeltaEventSchema,
+  conversationModelCallUpdatedEventSchema,
 ]);
 
 export type ConversationModelCallStatus = z.infer<
@@ -91,6 +108,9 @@ export type ConversationTranscriptItemKind = z.infer<
   typeof conversationTranscriptItemKindSchema
 >;
 export type ConversationModelCall = z.infer<typeof conversationModelCallSchema>;
+export type ConversationModelCallError = z.infer<
+  typeof conversationModelCallErrorSchema
+>;
 export type ConversationTranscriptItem = z.infer<
   typeof conversationTranscriptItemSchema
 >;

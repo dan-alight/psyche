@@ -1,4 +1,13 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  inArray,
+  isNotNull,
+} from "drizzle-orm";
 
 import { db } from "@/db/client";
 import {
@@ -43,6 +52,7 @@ export type StartModelCallInput = {
 export type StartedModelCall = {
   conversationId: number;
   modelCallId: number;
+  modelCall: ConversationModelCall;
   transcriptItems: ConversationTranscriptItem[];
   requestContext: {
     previousResponseId?: string;
@@ -67,6 +77,7 @@ export type FailModelCallInput = {
   conversationId: number;
   modelCallId: number;
   responseId?: string;
+  failure?: ConversationModelCallFailure;
 };
 
 export type AbortModelCallInput = {
@@ -75,7 +86,18 @@ export type AbortModelCallInput = {
 };
 
 export type ConversationMutationResult = ConversationState & {
+  modelCall: ConversationModelCall;
   transcriptItems: ConversationTranscriptItem[];
+};
+
+export type ConversationModelCallMutationResult = ConversationState & {
+  modelCall: ConversationModelCall;
+};
+
+export type ConversationModelCallFailure = {
+  message: string;
+  code?: string;
+  status?: number;
 };
 
 export type ConversationModelCallWithTranscriptItems = {
@@ -113,8 +135,12 @@ export type ConversationStore = {
   completeModelCall(
     input: CompleteModelCallInput,
   ): Promise<ConversationMutationResult>;
-  failModelCall(input: FailModelCallInput): Promise<ConversationState>;
-  abortModelCall(input: AbortModelCallInput): Promise<ConversationState>;
+  failModelCall(
+    input: FailModelCallInput,
+  ): Promise<ConversationModelCallMutationResult>;
+  abortModelCall(
+    input: AbortModelCallInput,
+  ): Promise<ConversationModelCallMutationResult>;
   abortRunningModelCalls(): Promise<number>;
 };
 
@@ -158,7 +184,10 @@ export function createDrizzleConversationStore(): ConversationStore {
         const previousResponseId = existing
           ? selectPreviousResponseId(tx, existing.id, input.transport)
           : undefined;
-        const historyItems = selectConversationItems(tx, conversationId);
+        const historyItems = selectCompletedConversationItems(
+          tx,
+          conversationId,
+        );
 
         const modelCallInput: ConversationModelCallInsert = {
           conversationId,
@@ -209,6 +238,7 @@ export function createDrizzleConversationStore(): ConversationStore {
         return {
           conversationId,
           modelCallId: modelCall.id,
+          modelCall,
           transcriptItems,
           requestContext: {
             previousResponseId,
@@ -235,15 +265,20 @@ export function createDrizzleConversationStore(): ConversationStore {
           functionCalls: input.functionCalls ?? [],
         });
 
-        tx.update(conversationModelCall)
+        const modelCall = tx
+          .update(conversationModelCall)
           .set({
             responseId: input.responseId,
             status: "completed",
+            failureMessage: null,
+            failureCode: null,
+            failureStatus: null,
             usage: input.usage,
             completedAt: now,
           })
           .where(eq(conversationModelCall.id, input.modelCallId))
-          .run();
+          .returning()
+          .get();
 
         tx.update(conversation)
           .set({ updatedAt: now })
@@ -263,6 +298,7 @@ export function createDrizzleConversationStore(): ConversationStore {
 
         return {
           ...selectState(tx, input.conversationId),
+          modelCall,
           transcriptItems,
         };
       });
@@ -273,21 +309,29 @@ export function createDrizzleConversationStore(): ConversationStore {
       return db.transaction((tx) => {
         getRunningModelCall(tx, input.conversationId, input.modelCallId);
 
-        tx.update(conversationModelCall)
+        const modelCall = tx
+          .update(conversationModelCall)
           .set({
             responseId: input.responseId,
             status: "failed",
+            failureMessage: input.failure?.message,
+            failureCode: input.failure?.code,
+            failureStatus: input.failure?.status,
             completedAt: now,
           })
           .where(eq(conversationModelCall.id, input.modelCallId))
-          .run();
+          .returning()
+          .get();
 
         tx.update(conversation)
           .set({ updatedAt: now })
           .where(eq(conversation.id, input.conversationId))
           .run();
 
-        return selectState(tx, input.conversationId);
+        return {
+          ...selectState(tx, input.conversationId),
+          modelCall,
+        };
       });
     },
     async abortModelCall(input) {
@@ -296,20 +340,25 @@ export function createDrizzleConversationStore(): ConversationStore {
       return db.transaction((tx) => {
         getRunningModelCall(tx, input.conversationId, input.modelCallId);
 
-        tx.update(conversationModelCall)
+        const modelCall = tx
+          .update(conversationModelCall)
           .set({
             status: "aborted",
             completedAt: now,
           })
           .where(eq(conversationModelCall.id, input.modelCallId))
-          .run();
+          .returning()
+          .get();
 
         tx.update(conversation)
           .set({ updatedAt: now })
           .where(eq(conversation.id, input.conversationId))
           .run();
 
-        return selectState(tx, input.conversationId);
+        return {
+          ...selectState(tx, input.conversationId),
+          modelCall,
+        };
       });
     },
     async abortRunningModelCalls() {
@@ -870,6 +919,27 @@ function selectConversationItems(
     .select()
     .from(conversationItem)
     .where(eq(conversationItem.conversationId, conversationId))
+    .orderBy(asc(conversationItem.sequence))
+    .all();
+}
+
+function selectCompletedConversationItems(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  conversationId: number,
+) {
+  return tx
+    .select(getTableColumns(conversationItem))
+    .from(conversationItem)
+    .innerJoin(
+      conversationModelCall,
+      eq(conversationItem.modelCallId, conversationModelCall.id),
+    )
+    .where(
+      and(
+        eq(conversationItem.conversationId, conversationId),
+        eq(conversationModelCall.status, "completed"),
+      ),
+    )
     .orderBy(asc(conversationItem.sequence))
     .all();
 }

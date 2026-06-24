@@ -138,6 +138,7 @@ export class AgentHarness {
           conversationManager,
           startedModelCall,
           streamResult.output,
+          streamResult.error,
         );
         modelCallFinished = true;
         throw modelStreamError(streamResult.error);
@@ -148,19 +149,25 @@ export class AgentHarness {
           conversationManager,
           startedModelCall,
           streamResult.output,
+          streamResult.error,
         );
         modelCallFinished = true;
         throw modelStreamError(streamResult.error);
       }
 
       if (streamResult.status === "incomplete") {
+        const incompleteError = new Error(
+          "Model stream ended before response completed",
+        );
+
         await failModelCall(
           conversationManager,
           startedModelCall,
           streamResult.output,
+          incompleteError,
         );
         modelCallFinished = true;
-        throw new Error("Model stream ended before response completed");
+        throw incompleteError;
       }
 
       await conversationManager.completeModelCall({
@@ -178,6 +185,7 @@ export class AgentHarness {
           conversationManager,
           startedModelCall,
           streamResult.output,
+          error,
         );
       }
 
@@ -270,11 +278,13 @@ async function failModelCall(
   conversationStore: Pick<ConversationManager, "failModelCall">,
   startedModelCall: StartedModelCall,
   output: CapturedModelOutput,
+  error: unknown,
 ) {
   await conversationStore.failModelCall({
     conversationId: startedModelCall.conversationId,
     modelCallId: startedModelCall.modelCallId,
     responseId: output.responseId,
+    failure: toModelCallFailure(error),
   });
 }
 
@@ -282,12 +292,44 @@ async function tryFailModelCall(
   conversationStore: Pick<ConversationManager, "failModelCall">,
   startedModelCall: StartedModelCall,
   output: CapturedModelOutput,
+  error: unknown,
 ) {
   try {
-    await failModelCall(conversationStore, startedModelCall, output);
+    await failModelCall(conversationStore, startedModelCall, output, error);
   } catch {
     // Preserve the model/client failure that led to this cleanup path.
   }
+}
+
+function toModelCallFailure(error: unknown) {
+  if (isErrorLike(error)) {
+    return removeUndefined({
+      message: error.message,
+      code: typeof error.code === "string" ? error.code : undefined,
+      status: typeof error.status === "number" ? error.status : undefined,
+    });
+  }
+
+  return {
+    message: "Model call failed",
+  };
+}
+
+function isErrorLike(
+  error: unknown,
+): error is { message: string; code?: unknown; status?: unknown } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  );
+}
+
+function removeUndefined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry) => entry[1] !== undefined),
+  ) as T;
 }
 
 async function streamModelAttempt(

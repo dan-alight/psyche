@@ -5,6 +5,7 @@ import { ConversationManager } from "@/conversations/ConversationManager";
 import type { ConversationStore } from "@/modelClients/conversationStore";
 import type { ModelCallRequest, ModelClient, ModelStreamEvent, ProviderAuth } from "@/modelClients/types";
 import { encryptPayload } from "@/credentialCrypto";
+import type { ConversationModelCall } from "@/db/schema";
 import type { CredentialRecord, ProviderAccessStore, ProviderRecord } from "@/providerStore";
 
 const secret = "test-credential-secret";
@@ -130,11 +131,12 @@ describe("AgentHarness", () => {
       { type: "text.delta", delta: "Partial" },
       { type: "error", status: 401, code: "invalid_token", message: "expired" }
     ]));
+    const conversationStore = createConversationStore();
     const harness = new AgentHarness({
       store,
       credentialEncryptionKey: secret,
       conversationManager: new ConversationManager({
-        store: createConversationStore(),
+        store: conversationStore,
         initialTranscriptItemId: 0,
       }),
       refreshOAuthToken,
@@ -153,6 +155,16 @@ describe("AgentHarness", () => {
 
     expect(createModelClient).toHaveBeenCalledOnce();
     expect(refreshOAuthToken).not.toHaveBeenCalled();
+    expect(conversationStore.failedModelCalls).toEqual([{
+      conversationId: 42,
+      modelCallId: 1,
+      responseId: undefined,
+      failure: {
+        message: "expired",
+        status: 401,
+        code: "invalid_token",
+      },
+    }]);
   });
 
 });
@@ -174,10 +186,12 @@ function fakeClient(events: ModelStreamEvent[]): ModelClient {
 function createConversationStore() {
   const startedModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]> = [];
   const completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]> = [];
+  const failedModelCalls: Array<Parameters<ConversationStore["failModelCall"]>[0]> = [];
 
   return {
     startedModelCalls,
     completedModelCalls,
+    failedModelCalls,
     async getState(conversationId) {
       return {
         conversationId,
@@ -199,6 +213,7 @@ function createConversationStore() {
       return {
         conversationId: 42,
         modelCallId: 1,
+        modelCall: modelCall({ id: 1, status: "running" }),
         transcriptItems: [],
         requestContext: {
           historyItems: []
@@ -216,19 +231,41 @@ function createConversationStore() {
         conversationId: input.conversationId,
         previousResponseId: input.responseId,
         items: [],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "completed",
+          responseId: input.responseId ?? null,
+        }),
         transcriptItems: []
       };
     },
     async failModelCall(input) {
+      failedModelCalls.push(input);
+
       return {
         conversationId: input.conversationId,
-        items: []
+        items: [],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "failed",
+          responseId: input.responseId ?? null,
+          failureMessage: input.failure?.message ?? null,
+          failureCode: input.failure?.code ?? null,
+          failureStatus: input.failure?.status ?? null,
+        }),
       };
     },
     async abortModelCall(input) {
       return {
         conversationId: input.conversationId,
-        items: []
+        items: [],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "aborted",
+        }),
       };
     },
     async abortRunningModelCalls() {
@@ -237,6 +274,28 @@ function createConversationStore() {
   } satisfies ConversationStore & {
     startedModelCalls: Array<Parameters<ConversationStore["startModelCall"]>[0]>;
     completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]>;
+    failedModelCalls: Array<Parameters<ConversationStore["failModelCall"]>[0]>;
+  };
+}
+
+function modelCall(
+  input: Partial<ConversationModelCall> & Pick<ConversationModelCall, "id">,
+): ConversationModelCall {
+  return {
+    id: input.id,
+    conversationId: input.conversationId ?? 42,
+    providerKey: "openai",
+    model: "gpt-test",
+    transport: "responses",
+    previousResponseId: null,
+    responseId: input.responseId ?? null,
+    status: input.status ?? "running",
+    failureMessage: input.failureMessage ?? null,
+    failureCode: input.failureCode ?? null,
+    failureStatus: input.failureStatus ?? null,
+    usage: null,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    completedAt: input.completedAt ?? null,
   };
 }
 

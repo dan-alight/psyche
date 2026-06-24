@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ConversationLiveEvent,
+  ConversationModelCall,
   ConversationTranscriptItem,
 } from "@psyche/shared";
 
@@ -19,6 +20,7 @@ import {
 type StreamState = {
   items: ConversationTranscriptItem[];
   liveTextByModelCallId: Map<number, string>;
+  modelCallsById: Map<number, ConversationModelCall>;
   status: "connecting" | "open" | "closed" | "error";
   error?: string;
 };
@@ -31,6 +33,7 @@ type StreamAction =
 const initialStreamState: StreamState = {
   items: [],
   liveTextByModelCallId: new Map(),
+  modelCallsById: new Map(),
   status: "closed",
 };
 
@@ -90,6 +93,16 @@ export function HomePage() {
       ),
     [recentQuery.data],
   );
+  const loadedModelCallsById = useMemo(
+    () =>
+      new Map(
+        recentQuery.data?.modelCalls.map(({ modelCall }) => [
+          modelCall.id,
+          modelCall,
+        ]) ?? [],
+      ),
+    [recentQuery.data],
+  );
   const streamStartTranscriptItemId = useMemo(
     () => maxTranscriptItemId(loadedItems),
     [loadedItems],
@@ -97,6 +110,10 @@ export function HomePage() {
   const transcriptItems = useMemo(
     () => mergeTranscriptItems(loadedItems, streamState.items),
     [loadedItems, streamState.items],
+  );
+  const modelCallsById = useMemo(
+    () => mergeModelCalls(loadedModelCallsById, streamState.modelCallsById),
+    [loadedModelCallsById, streamState.modelCallsById],
   );
 
   useEffect(() => {
@@ -161,11 +178,10 @@ export function HomePage() {
     });
   }
 
-  const liveOutputs = [...streamState.liveTextByModelCallId.entries()]
-    .filter(([, content]) => content.length > 0)
-    .sort(([firstModelCallId], [secondModelCallId]) => (
-      firstModelCallId - secondModelCallId
-    ));
+  const liveOutputs = liveOutputRows(
+    streamState.liveTextByModelCallId,
+    streamState.modelCallsById,
+  );
   const pageError =
     providersQuery.error ??
     modelsQuery.error ??
@@ -246,15 +262,36 @@ export function HomePage() {
 
       <div className={styles.transcript} aria-live="polite">
         {transcriptItems.map((item) => (
-          <TranscriptRow key={item.id} item={item} />
+          <TranscriptRow
+            key={item.id}
+            item={item}
+            modelCall={
+              item.modelCallId === null
+                ? undefined
+                : modelCallsById.get(item.modelCallId)
+            }
+          />
         ))}
         {liveOutputs.map(([modelCallId, content]) => (
           <div
             key={`live-${modelCallId}`}
-            className={`${styles.row} ${styles.assistant}`}
+            className={`${styles.row} ${
+              content.status === "failed" || content.status === "aborted"
+                ? styles.failed
+                : styles.assistant
+            }`}
           >
-            <div className={styles.role}>Assistant streaming</div>
-            <pre>{content}</pre>
+            <div className={styles.role}>
+              {content.status === "failed"
+                ? "Assistant failed"
+                : content.status === "aborted"
+                  ? "Assistant aborted"
+                  : "Assistant streaming"}
+            </div>
+            <pre>{content.text || content.error || content.status}</pre>
+            {content.error && content.text ? (
+              <p className={styles.inlineError}>{content.error}</p>
+            ) : null}
           </div>
         ))}
       </div>
@@ -290,6 +327,23 @@ function streamReducer(state: StreamState, action: StreamAction): StreamState {
     };
   }
 
+  if (action.event.type === "model_call_updated") {
+    const modelCallsById = new Map(state.modelCallsById);
+    const liveTextByModelCallId = new Map(state.liveTextByModelCallId);
+
+    modelCallsById.set(action.event.modelCall.id, action.event.modelCall);
+
+    if (action.event.modelCall.status === "completed") {
+      liveTextByModelCallId.delete(action.event.modelCall.id);
+    }
+
+    return {
+      ...state,
+      liveTextByModelCallId,
+      modelCallsById,
+    };
+  }
+
   const liveTextByModelCallId = new Map(state.liveTextByModelCallId);
 
   if (
@@ -306,7 +360,13 @@ function streamReducer(state: StreamState, action: StreamAction): StreamState {
   };
 }
 
-function TranscriptRow({ item }: { item: ConversationTranscriptItem }) {
+function TranscriptRow({
+  item,
+  modelCall,
+}: {
+  item: ConversationTranscriptItem;
+  modelCall?: ConversationModelCall;
+}) {
   const role =
     item.kind === "user_prompt"
       ? "User"
@@ -318,7 +378,9 @@ function TranscriptRow({ item }: { item: ConversationTranscriptItem }) {
       ? `${item.toolName ?? "tool"}(${item.toolArguments ?? ""})`
       : item.content;
   const tone =
-    item.kind === "user_prompt"
+    modelCall?.status === "failed" || modelCall?.status === "aborted"
+      ? styles.failed
+      : item.kind === "user_prompt"
       ? styles.user
       : item.kind === "assistant_output"
         ? styles.assistant
@@ -351,4 +413,44 @@ function sortTranscriptItems(items: ConversationTranscriptItem[]) {
 
 function maxTranscriptItemId(items: ConversationTranscriptItem[]) {
   return Math.max(0, ...items.map((item) => item.id));
+}
+
+function mergeModelCalls(
+  first: Map<number, ConversationModelCall>,
+  second: Map<number, ConversationModelCall>,
+) {
+  return new Map([...first, ...second]);
+}
+
+function liveOutputRows(
+  liveTextByModelCallId: Map<number, string>,
+  modelCallsById: Map<number, ConversationModelCall>,
+) {
+  const modelCallIds = new Set([
+    ...liveTextByModelCallId.keys(),
+    ...[...modelCallsById.values()]
+      .filter(
+        (modelCall) =>
+          modelCall.status === "failed" || modelCall.status === "aborted",
+      )
+      .map((modelCall) => modelCall.id),
+  ]);
+
+  return [...modelCallIds]
+    .map((modelCallId) => {
+      const modelCall = modelCallsById.get(modelCallId);
+
+      return [
+        modelCallId,
+        {
+          text: liveTextByModelCallId.get(modelCallId) ?? "",
+          status: modelCall?.status ?? "running",
+          error: modelCall?.failureMessage ?? undefined,
+        },
+      ] as const;
+    })
+    .filter(([, content]) => content.text || content.status !== "completed")
+    .sort(([firstModelCallId], [secondModelCallId]) => (
+      firstModelCallId - secondModelCallId
+    ));
 }

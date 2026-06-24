@@ -71,6 +71,9 @@ export const conversationModelCall = sqliteTable("conversation_model_call", {
   previousResponseId: text("previous_response_id"),
   responseId: text("response_id"),
   status: text("status", { enum: ["running", "completed", "failed", "aborted"] }).notNull(),
+  failureMessage: text("failure_message"),
+  failureCode: text("failure_code"),
+  failureStatus: integer("failure_status"),
   usage: text("usage", { mode: "json" }).$type<unknown>(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   completedAt: integer("completed_at", { mode: "timestamp" })

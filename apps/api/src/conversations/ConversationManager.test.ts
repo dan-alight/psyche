@@ -15,6 +15,43 @@ import type {
 } from "@/modelClients/conversationStore";
 
 describe("ConversationManager", () => {
+  it("publishes created model calls before their transcript items", async () => {
+    const userPrompt = transcriptItem({
+      id: 2,
+      modelCallId: 10,
+      kind: "user_prompt",
+      content: "Hi",
+    });
+    const context = createStore({
+      startTranscriptItems: [userPrompt],
+    });
+    const manager = new ConversationManager({
+      store: context.store,
+      initialTranscriptItemId: 0,
+    });
+    const subscription = await manager.subscribeAfter({
+      afterTranscriptItemId: 0,
+    });
+
+    await manager.startModelCall(modelCallInput());
+
+    expect(await readNext(subscription)).toEqual({
+      type: "model_call_updated",
+      liveEventId: 1,
+      modelCall: expect.objectContaining({
+        id: 10,
+        conversationId: 1,
+        status: "running",
+      }),
+    });
+    expect(await readNext(subscription)).toEqual({
+      type: "transcript_item",
+      item: userPrompt,
+    });
+
+    subscription.close();
+  });
+
   it("backfills transcript items and live deltas for mid-stream subscribers", async () => {
     const userPrompt = transcriptItem({
       id: 2,
@@ -47,7 +84,7 @@ describe("ConversationManager", () => {
     });
     expect(await readNext(subscription)).toEqual({
       type: "text_delta",
-      liveEventId: 1,
+      liveEventId: 2,
       conversationId: 1,
       modelCallId: 10,
       afterTranscriptItemId: 2,
@@ -102,6 +139,47 @@ describe("ConversationManager", () => {
       item: assistantOutput,
     });
     expect(await hasImmediateEvent(subscription)).toBe(false);
+
+    subscription.close();
+  });
+
+  it("publishes failed model call updates over active subscriptions", async () => {
+    const context = createStore();
+    const manager = new ConversationManager({
+      store: context.store,
+      initialTranscriptItemId: 0,
+    });
+    const subscription = await manager.subscribeAfter({
+      afterTranscriptItemId: 0,
+    });
+
+    await manager.failModelCall({
+      conversationId: 1,
+      modelCallId: 10,
+      failure: {
+        message: "Model overloaded",
+        code: "overloaded",
+        status: 503,
+      },
+    });
+
+    expect(await readNext(subscription)).toEqual({
+      type: "model_call_updated",
+      liveEventId: 1,
+      modelCall: expect.objectContaining({
+        id: 10,
+        conversationId: 1,
+        status: "failed",
+        failureMessage: "Model overloaded",
+        failureCode: "overloaded",
+        failureStatus: 503,
+      }),
+      error: {
+        message: "Model overloaded",
+        code: "overloaded",
+        status: 503,
+      },
+    });
 
     subscription.close();
   });
@@ -312,6 +390,11 @@ function createStore(input: {
       return {
         conversationId: 1,
         modelCallId: 10,
+        modelCall: modelCall({
+          id: 10,
+          conversationId: 1,
+          status: "running",
+        }),
         transcriptItems: startTranscriptItems,
         requestContext: {
           historyItems: [],
@@ -328,6 +411,12 @@ function createStore(input: {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "completed",
+          responseId: input.responseId ?? null,
+        }),
         transcriptItems: completeTranscriptItems,
       };
     },
@@ -335,12 +424,26 @@ function createStore(input: {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "failed",
+          responseId: input.responseId ?? null,
+          failureMessage: input.failure?.message ?? null,
+          failureCode: input.failure?.code ?? null,
+          failureStatus: input.failure?.status ?? null,
+        }),
       };
     },
     async abortModelCall(input: Parameters<ConversationStore["abortModelCall"]>[0]) {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "aborted",
+        }),
       };
     },
     async abortRunningModelCalls() {
@@ -349,6 +452,27 @@ function createStore(input: {
   } satisfies ConversationStore;
 
   return { store, transcriptItems, getMaxTranscriptItemId };
+}
+
+function modelCall(
+  input: Partial<ConversationModelCall> & Pick<ConversationModelCall, "id">,
+): ConversationModelCall {
+  return {
+    id: input.id,
+    conversationId: input.conversationId ?? 1,
+    providerKey: "openai",
+    model: "gpt-test",
+    transport: "responses",
+    previousResponseId: null,
+    responseId: input.responseId ?? null,
+    status: input.status ?? "running",
+    failureMessage: input.failureMessage ?? null,
+    failureCode: input.failureCode ?? null,
+    failureStatus: input.failureStatus ?? null,
+    usage: null,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    completedAt: input.completedAt ?? null,
+  };
 }
 
 function modelCallInput(): Parameters<ConversationStore["startModelCall"]>[0] {

@@ -64,6 +64,13 @@
       "when": 1782091320000,
       "tag": "0008_seed_openai_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1782199200000,
+      "tag": "0009_model_call_failures",
+      "breakpoints": true
     }
   ]
 }

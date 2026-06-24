@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 
-import type { ConversationItem } from "@/db/schema";
+import type { ConversationItem, ConversationModelCall } from "@/db/schema";
 import { ChatCompletionsClient } from "@/modelClients/ChatCompletionsClient";
 import type { ConversationState, ConversationStore } from "@/modelClients/conversationStore";
 import { ResponsesClient } from "@/modelClients/ResponsesClient";
@@ -668,6 +668,11 @@ function createMemoryConversationStore(initial: ConversationState) {
       return {
         conversationId: state.conversationId,
         modelCallId,
+        modelCall: modelCall({
+          id: modelCallId,
+          conversationId: state.conversationId,
+          status: "running",
+        }),
         transcriptItems: [],
         requestContext: {
           previousResponseId: state.previousResponseId,
@@ -694,17 +699,47 @@ function createMemoryConversationStore(initial: ConversationState) {
       });
       state.previousResponseId = input.responseId ?? state.previousResponseId;
       state.conversationId = input.conversationId;
-      return { ...state, items: [...state.items], transcriptItems: [] };
+      return {
+        ...state,
+        items: [...state.items],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "completed",
+          responseId: input.responseId ?? null,
+        }),
+        transcriptItems: [],
+      };
     },
     async failModelCall(input: Parameters<ConversationStore["failModelCall"]>[0]) {
       failedModelCalls.push(input);
       state.conversationId = input.conversationId;
-      return { ...state, items: [...state.items] };
+      return {
+        ...state,
+        items: [...state.items],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "failed",
+          responseId: input.responseId ?? null,
+          failureMessage: input.failure?.message ?? null,
+          failureCode: input.failure?.code ?? null,
+          failureStatus: input.failure?.status ?? null,
+        }),
+      };
     },
     async abortModelCall(input: Parameters<ConversationStore["abortModelCall"]>[0]) {
       abortedModelCalls.push(input);
       state.conversationId = input.conversationId;
-      return { ...state, items: [...state.items] };
+      return {
+        ...state,
+        items: [...state.items],
+        modelCall: modelCall({
+          id: input.modelCallId,
+          conversationId: input.conversationId,
+          status: "aborted",
+        }),
+      };
     },
     async abortRunningModelCalls() {
       return 0;
@@ -720,6 +755,27 @@ function createMemoryConversationStore(initial: ConversationState) {
     completedModelCalls: Array<Parameters<ConversationStore["completeModelCall"]>[0]>;
     failedModelCalls: Array<Parameters<ConversationStore["failModelCall"]>[0]>;
     abortedModelCalls: Array<Parameters<ConversationStore["abortModelCall"]>[0]>;
+  };
+}
+
+function modelCall(
+  input: Partial<ConversationModelCall> & Pick<ConversationModelCall, "id">,
+): ConversationModelCall {
+  return {
+    id: input.id,
+    conversationId: input.conversationId ?? 0,
+    providerKey: "openai",
+    model: "gpt-test",
+    transport: "responses",
+    previousResponseId: null,
+    responseId: input.responseId ?? null,
+    status: input.status ?? "running",
+    failureMessage: input.failureMessage ?? null,
+    failureCode: input.failureCode ?? null,
+    failureStatus: input.failureStatus ?? null,
+    usage: null,
+    createdAt: new Date(0),
+    completedAt: input.completedAt ?? null,
   };
 }
 

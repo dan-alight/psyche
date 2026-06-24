@@ -63,7 +63,7 @@ describe("conversation routes", () => {
     });
     expect(store.lastListRecentInput).toEqual({
       limit: 1,
-      statuses: ["completed", "running"],
+      statuses: ["completed", "running", "failed", "aborted"],
     });
 
     await app.close();
@@ -158,6 +158,7 @@ function createStore(input: {
       return {
         conversationId: 1,
         modelCallId: 1,
+        modelCall: conversationModelCall({ id: 1, status: "running" }),
         transcriptItems: [],
         requestContext: {
           historyItems: [],
@@ -172,6 +173,10 @@ function createStore(input: {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: conversationModelCall({
+          id: input.modelCallId,
+          status: "completed",
+        }),
         transcriptItems: [],
       };
     },
@@ -179,12 +184,23 @@ function createStore(input: {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: conversationModelCall({
+          id: input.modelCallId,
+          status: "failed",
+          failureMessage: input.failure?.message ?? null,
+          failureCode: input.failure?.code ?? null,
+          failureStatus: input.failure?.status ?? null,
+        }),
       };
     },
     async abortModelCall(input: Parameters<ConversationStore["abortModelCall"]>[0]) {
       return {
         ...state,
         conversationId: input.conversationId,
+        modelCall: conversationModelCall({
+          id: input.modelCallId,
+          status: "aborted",
+        }),
       };
     },
     async abortRunningModelCalls() {
@@ -202,6 +218,9 @@ function createStore(input: {
 function conversationModelCall(input: {
   id: number;
   status: ConversationModelCall["status"];
+  failureMessage?: string | null;
+  failureCode?: string | null;
+  failureStatus?: number | null;
 }): ConversationModelCall {
   return {
     id: input.id,
@@ -212,6 +231,9 @@ function conversationModelCall(input: {
     previousResponseId: null,
     responseId: null,
     status: input.status,
+    failureMessage: input.failureMessage ?? null,
+    failureCode: input.failureCode ?? null,
+    failureStatus: input.failureStatus ?? null,
     usage: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     completedAt: null,

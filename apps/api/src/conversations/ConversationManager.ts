@@ -10,6 +10,7 @@ import {
   type ConversationStore,
   type ConversationMutationResult,
   type ConversationState,
+  type ConversationModelCallFailure,
   type FailModelCallInput,
   type StartedModelCall,
   type StartModelCallInput,
@@ -29,9 +30,17 @@ export type ConversationTranscriptItemEvent = {
   item: ConversationTranscriptItem;
 };
 
+export type ConversationModelCallUpdatedEvent = {
+  type: "model_call_updated";
+  liveEventId: number;
+  modelCall: ConversationModelCall;
+  error?: ConversationModelCallFailure;
+};
+
 export type ConversationLiveEvent =
   | ConversationTranscriptItemEvent
-  | ConversationTextDeltaEvent;
+  | ConversationTextDeltaEvent
+  | ConversationModelCallUpdatedEvent;
 
 export type ConversationSubscription = AsyncIterable<ConversationLiveEvent> & {
   close(): void;
@@ -58,6 +67,8 @@ export type CreateConversationManagerOptions = {
 const defaultRecentModelCallStatuses: ConversationModelCall["status"][] = [
   "completed",
   "running",
+  "failed",
+  "aborted",
 ];
 
 export class ConversationManager {
@@ -95,6 +106,7 @@ export class ConversationManager {
     return this.runExclusive(async () => {
       const started = await this.store.startModelCall(input);
 
+      this.publishModelCallUpdated(started.modelCall);
       this.publishTranscriptItems(started.transcriptItems);
 
       return started;
@@ -108,6 +120,7 @@ export class ConversationManager {
       const result = await this.store.completeModelCall(input);
 
       this.publishTranscriptItems(result.transcriptItems);
+      this.publishModelCallUpdated(result.modelCall);
       this.bufferedTextDeltasByModelCallId.delete(input.modelCallId);
 
       return result;
@@ -118,6 +131,7 @@ export class ConversationManager {
     return this.runExclusive(async () => {
       const result = await this.store.failModelCall(input);
 
+      this.publishModelCallUpdated(result.modelCall, input.failure);
       this.bufferedTextDeltasByModelCallId.delete(input.modelCallId);
 
       return result;
@@ -128,6 +142,7 @@ export class ConversationManager {
     return this.runExclusive(async () => {
       const result = await this.store.abortModelCall(input);
 
+      this.publishModelCallUpdated(result.modelCall);
       this.bufferedTextDeltasByModelCallId.delete(input.modelCallId);
 
       return result;
@@ -227,6 +242,18 @@ export class ConversationManager {
     for (const subscriber of this.subscribers) {
       subscriber.enqueueLive(event);
     }
+  }
+
+  private publishModelCallUpdated(
+    modelCall: ConversationModelCall,
+    error?: ConversationModelCallFailure,
+  ) {
+    this.publish({
+      type: "model_call_updated",
+      liveEventId: this.nextLiveEventId++,
+      modelCall,
+      error,
+    });
   }
 
   private snapshotBufferedTextDeltas(afterTranscriptItemId: number) {
@@ -382,12 +409,19 @@ class ConversationEventQueue
       return true;
     }
 
-    if (this.seenLiveEventIds.has(event.liveEventId)) {
-      return false;
+    if (
+      event.type === "text_delta" ||
+      event.type === "model_call_updated"
+    ) {
+      if (this.seenLiveEventIds.has(event.liveEventId)) {
+        return false;
+      }
+
+      this.seenLiveEventIds.add(event.liveEventId);
+      return true;
     }
 
-    this.seenLiveEventIds.add(event.liveEventId);
-    return true;
+    return false;
   }
 }
 
